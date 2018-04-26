@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["read","Reads the special register"],["write","Writes to the special register"]]});
