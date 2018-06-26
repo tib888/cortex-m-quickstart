@@ -14,10 +14,14 @@ extern crate onewire;
 extern crate panic_semihosting;
 extern crate stm32f103xx_hal as hal;
 
+pub mod rgb;
+
 use core::fmt::Write;
 use cortex_m::peripheral::syst::SystClkSource;
 use hal::prelude::*;
 use hal::stm32f103xx;
+use ir::NecReceiver;
+use rgb::*;
 use rt::ExceptionFrame;
 use sh::hio;
 
@@ -26,9 +30,6 @@ static mut TICK: u32 = 0;
 entry!(main);
 
 fn main() -> ! {
-	let mut hstdout = hio::hstdout().unwrap();
-	writeln!(hstdout, "started...").unwrap();
-
 	let cp = cortex_m::Peripherals::take().unwrap();
 	let dp = stm32f103xx::Peripherals::take().unwrap();
 
@@ -37,6 +38,13 @@ fn main() -> ! {
 	let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
 	let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
 	let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
+
+	//free PB3, PB4 from JTAG to be used as GPIO:
+	let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
+	//#[allow(unused_unsafe)]
+	afio.mapr
+		.mapr()
+		.modify(|_, w| unsafe { w.swj_cfg().bits(1) });
 
 	//Window unit pins:
 	let _valave_sense_a = gpioa.pa0.into_floating_input(&mut gpioa.crl);
@@ -51,13 +59,13 @@ fn main() -> ! {
 	//a11, a12: can
 
 	//IR receiver^
-	let _ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
+	let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
 
 	//let mut _lux0 = gpiob.pb0.into_anaglog_input(&mut gpiob.crl);
 	//let mut _lux1 = gpiob.pb1.into_anaglog_input(&mut gpiob.crl);
 
 	//onewire temperature measurement:
-	let _io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
+	let _io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl); //pb3, pb4 used as JTDO JTRST so they need to be freed somehow first!
 
 	let mut _ir_led = gpiob.pb5.into_push_pull_output(&mut gpiob.crl);
 
@@ -70,12 +78,14 @@ fn main() -> ! {
 	let mut _valve_drive_b = gpiob.pb11.into_push_pull_output(&mut gpiob.crh);
 
 	//RGB led:
-	let mut _r_led = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
-	let mut _g_led = gpiob.pb14.into_push_pull_output(&mut gpiob.crh);
-	let mut _b_led = gpiob.pb15.into_push_pull_output(&mut gpiob.crh);
+	let mut rgb = RgbLed::new(
+		gpiob.pb13.into_push_pull_output(&mut gpiob.crh),
+		gpiob.pb14.into_push_pull_output(&mut gpiob.crh),
+		gpiob.pb15.into_push_pull_output(&mut gpiob.crh),
+	);
 
 	//on board led^:
-	let mut _led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+	let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
 	// {
 	// 	//APB2 clock enable (for external irqs)
@@ -112,11 +122,29 @@ fn main() -> ! {
 	// configures the system timer to trigger a SysTick exception every second
 	let mut syst = cp.SYST;
 	syst.set_clock_source(SystClkSource::Core);
-	syst.set_reload(8_000_000); // period = 1s
+	syst.set_reload(4_000); // period = 500us
 	syst.enable_counter();
 	syst.enable_interrupt();
 
-	loop {}
+	let mut hstdout = hio::hstdout().unwrap();
+	writeln!(hstdout, "started...").unwrap();
+
+	rgb.color(Colors::Black);
+
+	let mut receiver = ir::IrReceiver::new(4_000 / 8); // period = 0.5ms = 500us
+
+	loop {
+		let t = unsafe { TICK };
+		let ir_cmd = receiver.receive(t, ir_receiver.is_low());
+
+		match ir_cmd {
+			Ok(ir::NecContent::Repeat) => {}
+			Ok(ir::NecContent::Data(_data)) => {
+				led.toggle();
+			}
+			_ => {}
+		}
+	}
 }
 
 // interrupt!(EXTI0, exti0, state: Option<HStdout> = None);
