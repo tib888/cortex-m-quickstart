@@ -1,8 +1,6 @@
-# `cortex-m-quickstart`
+# `room-pill`
 
-> A template for building applications for ARM Cortex-M microcontrollers
-
-# [Documentation](https://docs.rs/cortex-m-quickstart)
+> A blue-pill board (STM32F103) + peripherals
 
 # License
 
