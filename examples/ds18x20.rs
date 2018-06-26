@@ -1,21 +1,21 @@
 //! Read the temperature from DS18B20 1-wire temperature sensors connected to B4 GPIO
-#![deny(unsafe_code)]
+//! JTAG is removed from B3, B4 to make it work
+//#![deny(unsafe_code)]
 #![deny(warnings)]
 #![no_std]
 #![no_main]
 
 extern crate cortex_m;
-#[macro_use]
-extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
+#[macro_use]
+extern crate cortex_m_rt as rt;
 extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
 extern crate stm32f103xx_hal as hal;
 
 use core::fmt::Write;
-//use cortex_m::peripheral::syst::SystClkSource;
 use hal::delay::Delay;
 use hal::prelude::*;
 use hal::stm32f103xx;
@@ -28,6 +28,8 @@ use onewire::*;
 entry!(main);
 
 fn main() -> ! {
+    let mut hstdout = hio::hstdout().unwrap();
+
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = stm32f103xx::Peripherals::take().unwrap();
 
@@ -38,23 +40,26 @@ fn main() -> ! {
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
     //let clocks = rcc.cfgr
     //    .sysclk(72.mhz())
-    //     .pclk1(32.mhz())//?khz
+    //     .pclk1(32.mhz())
     //    .freeze(&mut flash.acr);
+
+    //free PB3, PB4 from JTAG to be used as GPIO:
+    let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
+    afio.mapr
+        .mapr()
+        .modify(|_, w| unsafe { w.swj_cfg().bits(1) });
 
     let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
 
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
     let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
-    let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
 
     let delay = Delay::new(cp.SYST, clocks);
+    let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
     let mut one_wire = OneWirePort::new(io, delay);
 
     let mut it = RomIterator::new(0);
-
-    let mut hstdout = hio::hstdout().unwrap();
-    //writeln!(hstdout, "started...").unwrap();
     loop {
         match one_wire.iterate_next(true, &mut it) {
             Ok(Some(rom)) => {
@@ -97,7 +102,7 @@ fn main() -> ! {
 exception!(HardFault, hard_fault);
 
 fn hard_fault(ef: &ExceptionFrame) -> ! {
-    panic!("HardFault at {:#?}", ef);
+    panic!("{:#?}", ef);
 }
 
 exception!(*, default_handler);
