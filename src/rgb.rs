@@ -28,7 +28,7 @@ where
     GPIN: OutputPin,
     BPIN: OutputPin,
 {
-    pub fn new(r: RPIN, g: GPIN, b: BPIN) -> RgbLed<RPIN, GPIN, BPIN> {
+    pub fn new(r: RPIN, g: GPIN, b: BPIN) -> Self {
         RgbLed { r, g, b }
     }
 

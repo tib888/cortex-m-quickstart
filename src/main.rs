@@ -14,6 +14,8 @@ extern crate onewire;
 extern crate panic_semihosting;
 extern crate stm32f103xx_hal as hal;
 
+pub mod floor_heating;
+pub mod light_control;
 pub mod rgb;
 
 use core::fmt::Write;
@@ -30,6 +32,10 @@ static mut TICK: u32 = 0;
 entry!(main);
 
 fn main() -> ! {
+	window_unit_main();
+}
+
+fn window_unit_main() -> ! {
 	let cp = cortex_m::Peripherals::take().unwrap();
 	let dp = stm32f103xx::Peripherals::take().unwrap();
 
