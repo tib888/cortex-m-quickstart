@@ -147,29 +147,3 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
         }
     }
 }
-
-pub fn refresh<Duration>(_state: &State<Duration>) {
-    //TODO: drive outputs, send messages
-
-    // match state {
-    //     State::Heating(_) => {
-    //         heat_request(true);
-    //         circulation(true);
-    //         thermostat(open);
-    //     }
-    //     State::AfterCirculation(_) => {
-    //         heat_request(false);
-    //         circulation(true);
-    //         thermostat(closed);
-    //     }
-    //     State::Standby(_) => {
-    //         heat_request(false);
-    //         circulation(false);
-    //         thermostat(closed);
-    //     }
-    //     ...
-    //     State::Error => {
-    //         display(sensor_missing_error)
-    //     } //???
-    // }
-}

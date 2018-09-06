@@ -63,6 +63,12 @@ fn main() -> ! {
     //On board led^:
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
+    //Thermostat opener SSR
+    let mut thermostat = gpiob.pb6.into_push_pull_output(&mut gpiob.crl);
+
+    //Pump starter SSR
+    let mut pump = gpiob.pb7.into_push_pull_output(&mut gpiob.crl);
+
     // configures the system timer to trigger a SysTick exception every half millisecond
     let mut syst = cp.SYST;
     syst.set_clock_source(SystClkSource::Core);
@@ -123,8 +129,41 @@ fn main() -> ! {
         floor_heating_state =
             floor_heating_state.update(&floor_heating_config, &floor_heating_sensors, delta_time);
 
-        //this will drive the outputs:
-        floor_heating::refresh(&floor_heating_state);
+        //drive outputs, send messages:
+        match floor_heating_state {
+            floor_heating::State::Heating(defreeze) => {
+                rgb.color(if defreeze {
+                    Colors::Purple
+                } else {
+                    Colors::Red
+                });
+                thermostat.set_high();
+                pump.set_high();
+                //CAN: heat request
+            }
+            floor_heating::State::AfterCirculation(_) => {
+                rgb.color(Colors::Yellow);
+                thermostat.set_low();
+                pump.set_high();
+                //CAN: no heat request
+            }
+            floor_heating::State::Standby(_) => {
+                rgb.color(Colors::Green);
+                thermostat.set_low();
+                pump.set_low();
+                //CAN: no heat request
+            }
+            floor_heating::State::FreezeProtectionCheckCirculation(_) => {
+                rgb.color(Colors::Blue);
+                thermostat.set_low();
+                pump.set_high();
+                //CAN: no heat request
+            }
+            floor_heating::State::Error => {
+                rgb.color(Colors::White);
+                //CAN: sensor missing error
+            }
+        }
     }
 }
 
