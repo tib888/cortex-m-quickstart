@@ -15,8 +15,8 @@ pub enum State<Duration> {
 pub struct Sensors<Temperature> {
     pub forward_temperature: Option<Temperature>,
     pub return_temperature: Option<Temperature>,
-    pub floor_temperature: Option<Temperature>,
     pub air_temperature: Option<Temperature>,
+    pub floor_temperature: Option<Temperature>,
 }
 
 #[derive(Clone, Copy)]
