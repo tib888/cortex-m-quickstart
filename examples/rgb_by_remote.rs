@@ -18,14 +18,34 @@ extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
-use cortex_m::peripheral::syst::SystClkSource;
 use hal::prelude::*;
 use hal::stm32f103xx;
+use hal::time::*;
 use ir::NecReceiver;
 use room_pill::rgb::*;
 use rt::ExceptionFrame;
 
-static mut TICK: u32 = 0;
+#[derive(Copy, Clone)]
+struct Time {
+    now: hal::time::Instant,
+    freq: u32,
+}
+
+impl Time {
+    fn new(tick: &hal::time::MonoTimer) -> Time {
+        Time {
+            now: tick.now(),
+            freq: tick.frequency().0,
+        }
+    }
+}
+
+impl ir::Instant for Time {
+    /// called on an older instant, returns te elapsed microseconds until the given now
+    fn elapsed_us_till(&self, now: &Self) -> u32 {
+        self.now.elapsed_till(&now.now) * 1_000_000u32 / self.freq
+    }
+}
 
 entry!(main);
 
@@ -52,19 +72,16 @@ fn main() -> ! {
     //On board led^:
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
-    // configures the system timer to trigger a SysTick exception every half millisecond
-    let mut syst = cp.SYST;
-    syst.set_clock_source(SystClkSource::Core);
-    syst.set_reload(4_000); // period = 500us
-    syst.enable_counter();
-    syst.enable_interrupt();
+    let mut flash = dp.FLASH.constrain();
+    let clocks = rcc.cfgr.freeze(&mut flash.acr);
+    let tick = MonoTimer::new(cp.DWT, clocks);
 
-    let mut receiver = ir::IrReceiver::new(4_000 / 8); // period = 0.5ms = 500us
+    let mut receiver = ir::IrReceiver::<Time>::new(); // period = 0.5ms = 500us
 
     let mut color = Colors::White as u32;
 
     loop {
-        let t = unsafe { TICK };
+        let t = Time::new(&tick);
         let ir_cmd = receiver.receive(t, ir_receiver.is_low());
 
         let c = match ir_cmd {
@@ -92,16 +109,8 @@ fn main() -> ! {
                 color = c;
             }
 
-            rgb.color(color);
+            rgb.raw_color(color);
         }
-    }
-}
-
-exception!(SysTick, sys_tick);
-
-fn sys_tick() {
-    unsafe {
-        TICK = TICK + 1;
     }
 }
 

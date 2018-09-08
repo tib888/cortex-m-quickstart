@@ -51,7 +51,11 @@ where
         };
     }
 
-    pub fn color(&mut self, col: u32) {
+    pub fn color(&mut self, color: Colors) {
+        self.raw_color(color as u32);
+    }
+
+    pub fn raw_color(&mut self, col: u32) {
         let c = col as u32;
         self.set(
             (c & 0x000080) != 0,

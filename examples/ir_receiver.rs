@@ -15,14 +15,12 @@ extern crate panic_semihosting;
 extern crate stm32f103xx_hal as hal;
 
 use core::fmt::Write;
-use cortex_m::peripheral::syst::SystClkSource;
 use hal::prelude::*;
 use hal::stm32f103xx;
 use ir::NecReceiver;
+use room_pill::ticker::*;
 use rt::ExceptionFrame;
 use sh::hio;
-
-static mut TICK: u32 = 0;
 
 entry!(main);
 
@@ -34,20 +32,15 @@ fn main() -> ! {
     let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
     let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
 
-    // configures the system timer to trigger a SysTick exception every half millisecond
-    let mut syst = cp.SYST;
-    syst.set_clock_source(SystClkSource::Core);
-    syst.set_reload(4_000); // period = 0.5ms => 2000Hz => 8_000_000 / 2_000 = 4_000	//4500 would be ideal for NEC decoding
-    syst.enable_counter();
-    syst.enable_interrupt();
+    let tick = Ticker::new(cp.DWT, cp.DCP, clocks);
 
-    let mut receiver = ir::IrReceiver::new(4_000 / 8); // period = 0.5ms = 500us
+    let mut receiver = ir::IrReceiver::<Time>::new(); // period = 0.5ms = 500us
 
     //let mut hstdout = hio::hstdout().unwrap();
     //writeln!(hstdout, "started...").unwrap();
 
     loop {
-        let t = unsafe { TICK };
+        let t = tick.now();
         let ir_cmd = receiver.receive(t, ir_receiver.is_low());
         print_ir_command(&ir_cmd);
     }
@@ -70,14 +63,6 @@ fn print_ir_command(ir_cmd: &nb::Result<ir::NecContent, u32>) {
                 .unwrap();
         }
         Err(nb::Error::WouldBlock) => {}
-    }
-}
-
-exception!(SysTick, sys_tick);
-
-fn sys_tick() {
-    unsafe {
-        TICK = TICK + 1;
     }
 }
 

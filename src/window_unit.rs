@@ -22,12 +22,11 @@ use core::fmt::Write;
 use cortex_m::peripheral::syst::SystClkSource;
 use hal::prelude::*;
 use hal::stm32f103xx;
-use ir::NecReceiver;
+use ir::{Instant, NecReceiver};
 use rgb::*;
+use room_pill::ticker::*;
 use rt::ExceptionFrame;
 use sh::hio;
-
-static mut TICK: u32 = 0;
 
 entry!(main);
 
@@ -93,6 +92,9 @@ fn window_unit_main() -> ! {
 	//on board led^:
 	let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
+	let tick = Ticker::new(cp.DWT, cp.DCP, clocks);
+	let tick = Ticker::new(cp.DWT, cp.DCP, clocks);
+
 	// {
 	// 	//APB2 clock enable (for external irqs)
 	// 	let afio = dp.AFIO; ////TODO .constrain(&mut rcc.apb2);
@@ -125,22 +127,11 @@ fn window_unit_main() -> ! {
 	// 	nvic.set_pending(Interrupt::EXTI0);
 	// }
 
-	// configures the system timer to trigger a SysTick exception every second
-	let mut syst = cp.SYST;
-	syst.set_clock_source(SystClkSource::Core);
-	syst.set_reload(4_000); // period = 500us
-	syst.enable_counter();
-	syst.enable_interrupt();
+	rgb.color(Colors::Black);
 
-	let mut hstdout = hio::hstdout().unwrap();
-	writeln!(hstdout, "started...").unwrap();
-
-	rgb.color(Colors::Black as u32);
-
-	let mut receiver = ir::IrReceiver::new(4_000 / 8); // period = 0.5ms = 500us
+	let mut receiver = ir::IrReceiver::<Time>::new(); // period = 0.5ms = 500us
 
 	loop {
-		let t = unsafe { TICK };
 		let ir_cmd = receiver.receive(t, ir_receiver.is_low());
 
 		match ir_cmd {
@@ -170,14 +161,6 @@ fn window_unit_main() -> ! {
 // 	//clear the pending interrupt flag
 // 	r.EXTI.pr.write(|w| w.pr15().set_bit());
 // }
-
-exception!(SysTick, sys_tick);
-
-fn sys_tick() {
-	unsafe {
-		TICK = TICK + 1;
-	}
-}
 
 exception!(HardFault, hard_fault);
 
