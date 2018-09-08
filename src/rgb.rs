@@ -11,6 +11,7 @@ where
     b: BPIN,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Colors {
     Black = 0x000000,
     Red = 0x0000FF,
@@ -50,7 +51,7 @@ where
         };
     }
 
-    pub fn color(&mut self, col: Colors) {
+    pub fn color(&mut self, col: u32) {
         let c = col as u32;
         self.set(
             (c & 0x000080) != 0,

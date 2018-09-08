@@ -61,24 +61,38 @@ fn main() -> ! {
 
     let mut receiver = ir::IrReceiver::new(4_000 / 8); // period = 0.5ms = 500us
 
+    let mut color = Colors::White as u32;
+
     loop {
         let t = unsafe { TICK };
         let ir_cmd = receiver.receive(t, ir_receiver.is_low());
 
-        match ir_cmd {
-            Ok(ir::NecContent::Repeat) => {}
+        let c = match ir_cmd {
+            Ok(ir::NecContent::Repeat) => None,
             Ok(ir::NecContent::Data(data)) => match data >> 8 {
-                0x20F04E | 0x807FC2 => rgb.color(Colors::Red),
-                0x20F08E | 0x807FF0 => rgb.color(Colors::Green),
-                0x20F0C6 | 0x807F08 => rgb.color(Colors::Yellow),
-                0x20F086 | 0x807F18 => rgb.color(Colors::Blue),
-                0x20F022 | 0x807FC8 => rgb.color(Colors::White),
+                0x20F04E | 0x807FC2 => Some(Colors::Red as u32),
+                0x20F08E | 0x807FF0 => Some(Colors::Green as u32),
+                0x20F0C6 | 0x807F08 => Some(Colors::Yellow as u32),
+                0x20F086 | 0x807F18 => Some(Colors::Blue as u32),
+                0x20F022 | 0x807FC8 => Some(Colors::White as u32),
                 _ => {
                     led.toggle();
-                    rgb.color(Colors::Black)
+                    Some(Colors::Black as u32)
                 }
             },
-            _ => {}
+            _ => None,
+        };
+
+        if let Some(c) = c {
+            if led.is_set_high() {
+                //mix mode
+                color = color ^ c;
+            } else {
+                //set mode
+                color = c;
+            }
+
+            rgb.color(color);
         }
     }
 }

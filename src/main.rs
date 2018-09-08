@@ -135,7 +135,7 @@ fn window_unit_main() -> ! {
 	let mut hstdout = hio::hstdout().unwrap();
 	writeln!(hstdout, "started...").unwrap();
 
-	rgb.color(Colors::Black);
+	rgb.color(Colors::Black as u32);
 
 	let mut receiver = ir::IrReceiver::new(4_000 / 8); // period = 0.5ms = 500us
 
