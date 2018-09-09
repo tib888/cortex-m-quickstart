@@ -19,7 +19,6 @@ pub mod light_control;
 pub mod rgb;
 
 use core::fmt::Write;
-use cortex_m::peripheral::syst::SystClkSource;
 use hal::prelude::*;
 use hal::stm32f103xx;
 use ir::{Instant, NecReceiver};

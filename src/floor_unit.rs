@@ -32,7 +32,6 @@ use core::fmt::Write;
 use hal::delay::Delay;
 use hal::prelude::*;
 use hal::stm32f103xx;
-//use hal::time::MonoTimer;
 use ir::{Instant, NecReceiver};
 use onewire::ds18x20::*;
 use onewire::*;
@@ -166,6 +165,17 @@ fn main() -> ! {
         }
     }
 
+    writeln!(
+        hstdout,
+        "{} + {} = {}, {} - {} = {}",
+        0xfffffff0u32,
+        100u32,
+        0xfffffff0u32.wrapping_add(100u32),
+        100u32,
+        0xfffffff0u32,
+        100u32.wrapping_sub(0xfffffff0u32)
+    ).unwrap();
+
     //not mutable anymore
     let roms = roms;
     let count = count;
@@ -198,6 +208,7 @@ fn main() -> ! {
                     _ => floor_heating_config.target_air_temperature, //etc.
                 };
                 //led.toggle();
+                rgb.color(Colors::Black);
                 if let Some(temp) = floor_heating_config.target_air_temperature {
                     writeln!(hstdout, "target = {}/16 C", temp).unwrap();
                 } else {
@@ -219,7 +230,7 @@ fn main() -> ! {
         led.toggle();
 
         // decrease the time resolution
-        let delta_time = duration(0, 0, delta / ticker.frequency;       
+        let delta_time = duration(0, 0, delta / ticker.frequency);
 
         // keep the difference measurement is accurate...
         last_time.shift(delta_time * ticker.frequency);

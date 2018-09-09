@@ -2,10 +2,10 @@ use cortex_m::peripheral::DCB;
 use cortex_m::peripheral::DWT;
 
 use ir::Instant;
-use rcc::Clocks;
+use stm32f103xx_hal::rcc::Clocks;
 
 #[derive(Copy, Clone)]
-struct Time {
+pub struct Time {
     now: u32,
 }
 
@@ -28,7 +28,7 @@ impl Time {
     }
 }
 
-struct Ticker {
+pub struct Ticker {
     pub frequency: u32, //herz
 }
 
@@ -41,7 +41,7 @@ impl Ticker {
         drop(dwt);
 
         Ticker {
-            frequency: clocks.sysclk(),
+            frequency: clocks.sysclk().0,
         }
     }
 
@@ -52,9 +52,9 @@ impl Ticker {
     }
 }
 
-impl ir::Instant for Time {
+impl Instant for Time {
     /// called on an older instant, returns the elapsed microseconds until the given now
     fn elapsed_us_till(&self, now: &Self) -> u32 {
-        self.now.elapsed_till(&now.now) >> 3 //8Mhz clock, so div by 8
+        self.elapsed_till(&now) >> 3 //8Mhz clock, so div by 8
     }
 }
