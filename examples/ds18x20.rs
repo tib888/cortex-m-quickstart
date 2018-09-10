@@ -74,9 +74,12 @@ fn main() -> ! {
 
                         let temperature = one_wire.read_temperature_measurement_result(&rom);
                         match temperature {
-                            Ok(t) => {
-                                writeln!(hstdout, "T = {} + {}/16 C", t >> 4, t & 0xF).unwrap()
-                            }
+                            Ok(t) => writeln!(
+                                hstdout,
+                                "T = {} + {}/16 C",
+                                t.whole_degrees(),
+                                t.fraction_degrees()
+                            ).unwrap(),
                             Err(code) => writeln!(hstdout, "Error: {:?}", code).unwrap(),
                         }
                     }

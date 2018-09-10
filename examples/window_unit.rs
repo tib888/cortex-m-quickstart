@@ -12,18 +12,15 @@ extern crate ir;
 extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
+extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
-
-pub mod floor_heating;
-pub mod light_control;
-pub mod rgb;
 
 use core::fmt::Write;
 use hal::prelude::*;
 use hal::stm32f103xx;
 use ir::{Instant, NecReceiver};
-use rgb::*;
-use room_pill::ticker::*;
+use room_pill::rgb::{Colors, RgbLed};
+use room_pill::time::{Ticker, Ticks, Time};
 use rt::ExceptionFrame;
 use sh::hio;
 
@@ -91,8 +88,9 @@ fn window_unit_main() -> ! {
 	//on board led^:
 	let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
-	let tick = Ticker::new(cp.DWT, cp.DCP, clocks);
-	let tick = Ticker::new(cp.DWT, cp.DCP, clocks);
+	let mut flash = dp.FLASH.constrain();
+	let clocks = rcc.cfgr.freeze(&mut flash.acr);
+	let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 
 	// {
 	// 	//APB2 clock enable (for external irqs)
@@ -128,10 +126,10 @@ fn window_unit_main() -> ! {
 
 	rgb.color(Colors::Black);
 
-	let mut receiver = ir::IrReceiver::<Time>::new(); // period = 0.5ms = 500us
+	let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
 
 	loop {
-		let ir_cmd = receiver.receive(t, ir_receiver.is_low());
+		let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
 
 		match ir_cmd {
 			Ok(ir::NecContent::Repeat) => {}

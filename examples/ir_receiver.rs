@@ -12,13 +12,14 @@ extern crate embedded_hal;
 extern crate ir;
 extern crate nb;
 extern crate panic_semihosting;
+extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
 use core::fmt::Write;
 use hal::prelude::*;
 use hal::stm32f103xx;
 use ir::NecReceiver;
-use room_pill::ticker::*;
+use room_pill::time::{Ticker, Ticks, Time};
 use rt::ExceptionFrame;
 use sh::hio;
 
@@ -32,9 +33,11 @@ fn main() -> ! {
     let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
     let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
 
-    let tick = Ticker::new(cp.DWT, cp.DCP, clocks);
+    let mut flash = dp.FLASH.constrain();
+    let clocks = rcc.cfgr.freeze(&mut flash.acr);
+    let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 
-    let mut receiver = ir::IrReceiver::<Time>::new(); // period = 0.5ms = 500us
+    let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
 
     //let mut hstdout = hio::hstdout().unwrap();
     //writeln!(hstdout, "started...").unwrap();
