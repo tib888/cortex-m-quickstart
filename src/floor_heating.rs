@@ -1,9 +1,7 @@
 use core::ops::Add;
 use core::ops::Sub;
 
-//type Temperature = f32; //celsius
-//type Duration = i32; //seconds
-
+//#[derive(Debug)]
 pub enum State<Duration> {
     Heating(bool),                              //bool=defrost
     AfterCirculation(Duration),                 //circulation_since_closed duration

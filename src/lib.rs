@@ -11,5 +11,5 @@ pub mod floor_heating;
 pub mod light_control;
 pub mod pump;
 pub mod rgb;
-pub mod ticker;
+pub mod time;
 pub mod valve;

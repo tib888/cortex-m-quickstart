@@ -28,39 +28,25 @@ extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
-use core::fmt::Write;
+//use core::fmt::Write;
 use hal::delay::Delay;
 use hal::prelude::*;
 use hal::stm32f103xx;
-use ir::{Instant, NecReceiver};
+use ir::NecReceiver;
 use onewire::ds18x20::*;
 use onewire::*;
 use room_pill::floor_heating;
 use room_pill::pump::*;
 use room_pill::rgb::*;
-use room_pill::ticker::*;
+use room_pill::time::*;
 use room_pill::valve::*;
 use rt::ExceptionFrame;
-use sh::hio;
-
-const DIV: u32 = 1000000;
-
-type Temperature = i16;
-
-fn celsius(degree: i16, degree_div_16: i16) -> Temperature {
-    (degree << 4) | degree_div_16
-}
-
-type Duration = u32;
-
-fn duration(hours: u32, minutes: u32, seconds: u32) -> Duration {
-    hours * 3600 + minutes * 60 + seconds
-}
+//use sh::hio;
 
 entry!(main);
 
 fn main() -> ! {
-    let mut hstdout = hio::hstdout().unwrap();
+    //let mut hstdout = hio::hstdout().unwrap();
 
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = stm32f103xx::Peripherals::take().unwrap();
@@ -98,33 +84,30 @@ fn main() -> ! {
         .modify(|_, w| unsafe { w.swj_cfg().bits(1) });
     let mut flash = dp.FLASH.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
-    //let clocks = rcc.cfgr
-    //    .sysclk(72.mhz())
-    //     .pclk1(32.mhz())
-    //    .freeze(&mut flash.acr);
+
     let delay = Delay::new(cp.SYST, clocks);
     let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
     let mut one_wire = OneWirePort::new(io, delay);
 
-    let tick = Ticker::new(cp.DWT, cp.DCP, clocks);
+    let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 
-    let mut receiver = ir::IrReceiver::<Time>::new();
+    let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
 
-    let mut floor_heating_state = floor_heating::State::Standby(0u32);
+    let mut floor_heating_state = floor_heating::State::Standby(Duration::sec(0));
 
     //this config will be updated by IR remote or CAN messages
     let mut floor_heating_config = floor_heating::Config {
-        max_forward_temperature: celsius(40, 0),
-        max_floor_temperature: celsius(29, 0),
-        target_air_temperature: Some(celsius(19, 0)),
-        temperature_histeresis: celsius(0, 1),
+        max_forward_temperature: Temperature::from_celsius(40, 0),
+        max_floor_temperature: Temperature::from_celsius(29, 0),
+        target_air_temperature: None, //Some(Temperature::from_celsius(19, 0)),
+        temperature_histeresis: Temperature::from_celsius(0, 1),
         freeze_protection: floor_heating::FreezeProtectionConfig {
-            min_temperature: celsius(5, 0),
-            safe_temperature: celsius(8, 0),
-            check_interval: duration(4, 0, 0), //4 hour
-            check_duration: duration(0, 4, 0), //4 min
+            min_temperature: Temperature::from_celsius(5, 0),
+            safe_temperature: Temperature::from_celsius(8, 0),
+            check_interval: Duration::<Seconds>::hms(4, 0, 0), //4 hour
+            check_duration: Duration::<Seconds>::hms(0, 4, 0), //4 min
         },
-        after_circulation_duration: duration(0, 4, 0),
+        after_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
     };
 
     let mut floor_heating_sensors = floor_heating::Sensors {
@@ -165,17 +148,6 @@ fn main() -> ! {
         }
     }
 
-    writeln!(
-        hstdout,
-        "{} + {} = {}, {} - {} = {}",
-        0xfffffff0u32,
-        100u32,
-        0xfffffff0u32.wrapping_add(100u32),
-        100u32,
-        0xfffffff0u32,
-        100u32.wrapping_sub(0xfffffff0u32)
-    ).unwrap();
-
     //not mutable anymore
     let roms = roms;
     let count = count;
@@ -190,55 +162,62 @@ fn main() -> ! {
             Ok(ir::NecContent::Repeat) => {}
             Ok(ir::NecContent::Data(data)) => {
                 floor_heating_config.target_air_temperature = match data >> 8 {
-                    0x807F80 => Some(celsius(20, 0)),                 //0
-                    0x807F72 => Some(celsius(21, 0)),                 //1
-                    0x807FB0 => Some(celsius(22, 0)),                 //2
-                    0x807F30 => Some(celsius(23, 0)),                 //3
-                    0x807F52 => Some(celsius(24, 0)),                 //4
-                    0x807F90 => Some(celsius(15, 0)),                 //5
-                    0x807F10 => Some(celsius(16, 0)),                 //6
-                    0x807F62 => Some(celsius(17, 0)),                 //7
-                    0x807FA0 => Some(celsius(18, 0)),                 //8
-                    0x807F20 => Some(celsius(19, 0)),                 //9
-                    0x20F04E | 0x807FC2 => Some(celsius(22, 0)),      //red
-                    0x20F08E | 0x807FF0 => Some(celsius(20, 0)),      //green
-                    0x20F0C6 | 0x807F08 => Some(celsius(18, 0)),      //yellow
-                    0x20F086 | 0x807F18 => Some(celsius(15, 0)),      //blue
-                    0x20F022 | 0x807FC8 => None,                      //OK
-                    _ => floor_heating_config.target_air_temperature, //etc.
+                    0x807F80 => Some(Temperature::from_celsius(20, 0)), //0
+                    0x807F72 => Some(Temperature::from_celsius(21, 0)), //1
+                    0x807FB0 => Some(Temperature::from_celsius(22, 0)), //2
+                    0x807F30 => Some(Temperature::from_celsius(23, 0)), //3
+                    0x807F52 => Some(Temperature::from_celsius(24, 0)), //4
+                    0x807F90 => Some(Temperature::from_celsius(15, 0)), //5
+                    0x807F10 => Some(Temperature::from_celsius(16, 0)), //6
+                    0x807F62 => Some(Temperature::from_celsius(17, 0)), //7
+                    0x807FA0 => Some(Temperature::from_celsius(18, 0)), //8
+                    0x807F20 => Some(Temperature::from_celsius(19, 0)), //9
+                    0x20F002 | 0x807F68 => floor_heating_config
+                        .target_air_temperature
+                        .map(|t| t + Temperature::from_celsius(0, 4)), //up +4/16 C
+                    0x20F082 | 0x807F58 => floor_heating_config
+                        .target_air_temperature
+                        .map(|t| t - Temperature::from_celsius(0, 4)), //down -4/16 C
+                    0x20F04E | 0x807FC2 => Some(Temperature::from_celsius(22, 0)), //red
+                    0x20F08E | 0x807FF0 => Some(Temperature::from_celsius(20, 0)), //green
+                    0x20F0C6 | 0x807F08 => Some(Temperature::from_celsius(18, 0)), //yellow
+                    0x20F086 | 0x807F18 => Some(Temperature::from_celsius(15, 0)), //blue
+                    0x20F022 | 0x807FC8 => None,                        //OK
+                    _ => floor_heating_config.target_air_temperature,   //etc.
                 };
-                //led.toggle();
                 rgb.color(Colors::Black);
-                if let Some(temp) = floor_heating_config.target_air_temperature {
-                    writeln!(hstdout, "target = {}/16 C", temp).unwrap();
-                } else {
-                    writeln!(hstdout, "target = none").unwrap();
-                }
+                // if let Some(temp) = floor_heating_config.target_air_temperature {
+                //     writeln!(hstdout, "target = {:?}/16 C", temp).unwrap();
+                // } else {
+                //     writeln!(hstdout, "target = none").unwrap();
+                // }
             }
             _ => {}
         }
 
         // calculate the time since last execution:
+        let delta = tick.now() - last_time;
 
-        let delta = last_time.elapsed();
-
-        // do not execute the followings to often: (teperature conversion time of the sensors is a lower limit)
-        if delta < ticker.frequency {
+        // do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
+        if delta.count < tick.frequency {
             continue;
         }
 
         led.toggle();
 
         // decrease the time resolution
-        let delta_time = duration(0, 0, delta / ticker.frequency);
+        let delta_time = Duration::sec(delta.count / tick.frequency);
 
         // keep the difference measurement is accurate...
-        last_time.shift(delta_time * ticker.frequency);
+        last_time = last_time + Duration::<Ticks>::from(delta_time.count * tick.frequency);
 
-        //read sensors and restart measurement
+        //read sensors and restart temperature measurement
         for i in 0..count {
             let result = match one_wire.read_temperature_measurement_result(&roms[i]) {
-                Ok(temperature) => Some(temperature),
+                Ok(temperature) => {
+                    //writeln!(hstdout, "temp[{}] = {:?}/16 C", i, temperature).unwrap();
+                    Some(temperature)
+                }
                 Err(_code) => None,
             };
             match i {
@@ -253,6 +232,8 @@ fn main() -> ! {
 
         floor_heating_state =
             floor_heating_state.update(&floor_heating_config, &floor_heating_sensors, delta_time);
+
+        //writeln!(hstdout, "{:?}", floor_heating_state).unwrap();
 
         // drive outputs, send messages:
         match floor_heating_state {
@@ -297,15 +278,11 @@ fn main() -> ! {
 exception!(HardFault, hard_fault);
 
 fn hard_fault(ef: &ExceptionFrame) -> ! {
-    let mut hstdout = hio::hstdout().unwrap();
-    writeln!(hstdout, "hf").unwrap();
     panic!("HardFault at {:#?}", ef);
 }
 
 exception!(*, default_handler);
 
 fn default_handler(irqn: i16) {
-    let mut hstdout = hio::hstdout().unwrap();
-    writeln!(hstdout, "ex").unwrap();
     panic!("Unhandled exception (IRQn = {})", irqn);
 }
