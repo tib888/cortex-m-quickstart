@@ -25,16 +25,21 @@ extern crate ir;
 extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
+extern crate pcd8544_hal;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
 //use core::fmt::Write;
+use embedded_hal::spi;
 use hal::delay::Delay;
 use hal::prelude::*;
+use hal::spi::Spi;
 use hal::stm32f103xx;
 use ir::NecReceiver;
 use onewire::ds18x20::*;
+use onewire::temperature::Temperature;
 use onewire::*;
+use pcd8544_hal::Pcd8544Spi;
 use room_pill::floor_heating;
 use room_pill::pump::*;
 use room_pill::rgb::*;
@@ -88,6 +93,8 @@ fn main() -> ! {
     let delay = Delay::new(cp.SYST, clocks);
     let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
     let mut one_wire = OneWirePort::new(io, delay);
+
+    // TODO setup SPI
 
     let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 
