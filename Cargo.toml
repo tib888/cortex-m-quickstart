@@ -30,8 +30,8 @@ git = "https://github.com/tib888/onewire"
 version = "0.4.1"
 
 [dependencies.pcd8544-hal]
-git = "https://github.com/dancek/pcd8544-hal"
-version = "0.1.0"
+git = "https://github.com/tib888/pcd8544-hal"
+version = "0.2.0"
 
 # Uncomment for the panic example.
 # panic-itm = "0.2.0"

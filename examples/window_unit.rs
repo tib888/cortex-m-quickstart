@@ -15,14 +15,14 @@ extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
-use core::fmt::Write;
+//use core::fmt::Write;
 use hal::prelude::*;
 use hal::stm32f103xx;
-use ir::{Instant, NecReceiver};
+use ir::NecReceiver;
 use room_pill::rgb::{Colors, RgbLed};
 use room_pill::time::{Ticker, Ticks, Time};
 use rt::ExceptionFrame;
-use sh::hio;
+//use sh::hio;
 
 entry!(main);
 
