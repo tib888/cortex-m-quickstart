@@ -10,13 +10,6 @@ pub enum State<Duration> {
     Error,
 }
 
-pub struct Sensors<Temperature> {
-    pub forward_temperature: Option<Temperature>,
-    pub return_temperature: Option<Temperature>,
-    pub air_temperature: Option<Temperature>,
-    pub floor_temperature: Option<Temperature>,
-}
-
 #[derive(Clone, Copy)]
 pub struct FreezeProtectionConfig<Temperature, Duration> {
     pub min_temperature: Temperature,
@@ -43,27 +36,30 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
     >(
         &self,
         config: &Config<Temperature, Duration>,
-        sensors: &Sensors<Temperature>,
+        forward_temperature: Option<Temperature>,
+        return_temperature: Option<Temperature>,
+        floor_temperature: Option<Temperature>,
+        air_temperature: Option<Temperature>,
         delta_time: Duration,
     ) -> State<Duration> {
         match self {
             State::Heating(defreeze) => {
                 //too hot protection:
-                if let Some(ref forward_temp) = sensors.forward_temperature {
+                if let Some(ref forward_temp) = forward_temperature {
                     if *forward_temp >= config.max_forward_temperature {
                         return State::AfterCirculation(Duration::default());
                     }
                 }
-                if let Some(ref floor_temp) = sensors.floor_temperature {
+                if let Some(ref floor_temp) = floor_temperature {
                     if *floor_temp >= config.max_floor_temperature {
                         return State::AfterCirculation(Duration::default());
                     }
                 }
 
                 if *defreeze {
-                    let return_temp = if let Some(ref temp) = sensors.return_temperature {
+                    let return_temp = if let Some(ref temp) = return_temperature {
                         temp
-                    } else if let Some(ref temp) = sensors.air_temperature {
+                    } else if let Some(ref temp) = air_temperature {
                         //use as a backup sensor
                         temp
                     } else {
@@ -77,9 +73,9 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
                     }
                 } else {
                     if let Some(ref target) = config.target_air_temperature {
-                        let current_temp = if let Some(ref temp) = sensors.air_temperature {
+                        let current_temp = if let Some(ref temp) = air_temperature {
                             temp
-                        } else if let Some(ref temp) = sensors.return_temperature {
+                        } else if let Some(ref temp) = return_temperature {
                             temp //use a backup sensor
                         } else {
                             return State::Error;
@@ -106,7 +102,7 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
 
             State::Standby(since_last_freeze_test) => {
                 if let Some(target) = config.target_air_temperature {
-                    if let Some(temp) = sensors.air_temperature {
+                    if let Some(temp) = air_temperature {
                         if temp < target - config.temperature_histeresis {
                             return State::Heating(false);
                         }
@@ -121,9 +117,9 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
             }
 
             State::FreezeProtectionCheckCirculation(circulation_duration) => {
-                let return_temp = if let Some(temp) = sensors.return_temperature {
+                let return_temp = if let Some(temp) = return_temperature {
                     temp
-                } else if let Some(temp) = sensors.air_temperature {
+                } else if let Some(temp) = air_temperature {
                     //use this as backup
                     temp
                 } else {

@@ -8,8 +8,17 @@
 //! Solid state relay 1 connected to B6 drives the valve
 //! Solid state relay 2 connected to B7 drives the pump
 //!
+//! pcd8544 lcd display conected to SPI1 and some gpio port:
+//!   PA5 = Display SPI clock
+//!   PA6 = Display SPI input - not used
+//!   PA7 = Display SPI data
+//!   PA4 = Display Data/Command
+//!   PA3 = Display Chip Select
+//!   PA1 = Display Reset
+//! TODO drive backlight too with a transistor?
+//!
 //! The remote changes the default config, the state displayed on the rgb led.
-//! Cotrols the floor heating accordig to the config.
+//! Controls the floor heating accordig to the config.
 //!
 //#![deny(unsafe_code)]
 //#![deny(warnings)]
@@ -181,15 +190,10 @@ fn main() -> ! {
         after_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
     };
 
-    let mut floor_heating_sensors = floor_heating::Sensors {
-        forward_temperature: None,
-        return_temperature: None,
-        air_temperature: None,
-        floor_temperature: None,
-    };
+    const MAX_COUNT: usize = 4;
+    let mut temp_sensors: [Option<Temperature>; MAX_COUNT] = [None; 4];
 
     //store the addresses of temp sensors, start measurement on each:
-    const MAX_COUNT: usize = 4;
     let mut roms = [[0u8; 8]; MAX_COUNT];
     let mut count = 0;
 
@@ -257,16 +261,10 @@ fn main() -> ! {
                     _ => floor_heating_config.target_air_temperature,   //etc.
                 };
                 rgb.color(Colors::Black);
-                // if let Some(temp) = floor_heating_config.target_air_temperature {
-                //     writeln!(hstdout, "target = {:?}/16 C", temp).unwrap();
-                //     print_temp(display, temp);
-                // } else {
-                //     writeln!(hstdout, "target = none").unwrap();
-                // }
                 print_temp(
                     &mut display,
                     5,
-                    "Cel:    ",
+                    "Cel:   >",
                     &floor_heating_config.target_air_temperature,
                 );
             }
@@ -286,101 +284,86 @@ fn main() -> ! {
         // decrease the time resolution
         let delta_time = Duration::sec(delta.count / tick.frequency);
 
-        // keep the difference measurement is accurate...
+        // keep the difference measurement is accurate by keeping the fractions...
         last_time = last_time + Duration::<Ticks>::from(delta_time.count * tick.frequency);
 
         //read sensors and restart temperature measurement
         for i in 0..count {
-            let result = match one_wire.read_temperature_measurement_result(&roms[i]) {
-                Ok(temperature) => {
-                    //writeln!(hstdout, "temp[{}] = {:?}/16 C", i, temperature).unwrap();
-                    Some(temperature)
-                }
+            temp_sensors[i] = match one_wire.read_temperature_measurement_result(&roms[i]) {
+                Ok(temperature) => Some(temperature),
                 Err(_code) => None,
-            };
-            match i {
-                0 => floor_heating_sensors.forward_temperature = result,
-                1 => floor_heating_sensors.return_temperature = result,
-                2 => floor_heating_sensors.air_temperature = result,
-                3 => floor_heating_sensors.floor_temperature = result,
-                _ => assert!(false),
             };
             let _ = one_wire.start_temperature_measurement(&roms[i]);
         }
 
-        floor_heating_state =
-            floor_heating_state.update(&floor_heating_config, &floor_heating_sensors, delta_time);
-
-        //writeln!(hstdout, "{:?}", floor_heating_state).unwrap();
+        floor_heating_state = floor_heating_state.update(
+            &floor_heating_config,
+            temp_sensors[0],
+            temp_sensors[1],
+            temp_sensors[2],
+            temp_sensors[3],
+            delta_time,
+        );
 
         // drive outputs, send messages:
-        display.clear();
-        display.set_position(0, 0);
-        match floor_heating_state {
+        let status_text = match floor_heating_state {
             floor_heating::State::Heating(defreeze) => {
-                rgb.color(if defreeze {
-                    // display.print("Olvasztas");
-                    Colors::Purple
-                } else {
-                    // display.print("Futes");
-                    Colors::Red
-                });
                 valve.open();
                 pump.start();
                 //CAN: heat request
+                if defreeze {
+                    rgb.color(Colors::Purple);
+                    "Olvasztas"
+                } else {
+                    rgb.color(Colors::Red);
+                    "Futes"
+                }
             }
             floor_heating::State::AfterCirculation(_) => {
-                // display.print("Utokeringetes");
-                rgb.color(Colors::Yellow);
                 valve.close();
                 pump.start();
                 //CAN: no heat request
+                rgb.color(Colors::Yellow);
+                "Utokeringetes"
             }
             floor_heating::State::Standby(_) => {
-                // display.print("Keszenlet");
-                rgb.color(Colors::Green);
                 valve.close();
                 pump.stop();
                 //CAN: no heat request
+                rgb.color(Colors::Green);
+                "Keszenlet"
             }
             floor_heating::State::FreezeProtectionCheckCirculation(_) => {
-                // display.print("Fagyvizsgalat");
-                rgb.color(Colors::Blue);
                 valve.close();
                 pump.start();
                 //CAN: no heat request
+                rgb.color(Colors::Blue);
+                "Fagyvizsgalat"
             }
             floor_heating::State::Error => {
-                // display.print("Szenzorhiba");
-                rgb.color(Colors::White);
                 //CAN: sensor missing error
+                rgb.color(Colors::White);
+                "Szenzorhiba"
             }
         };
 
-        print_temp(
-            &mut display,
-            1,
-            "Elore:  ",
-            &floor_heating_sensors.forward_temperature,
-        );
-        print_temp(
-            &mut display,
-            2,
-            "Vissza: ",
-            &floor_heating_sensors.return_temperature,
-        );
-        print_temp(
-            &mut display,
-            3,
-            "Padlo:  ",
-            &floor_heating_sensors.floor_temperature,
-        );
-        print_temp(
-            &mut display,
-            4,
-            "Levego: ",
-            &floor_heating_sensors.air_temperature,
-        );
+        //note: display.print(...) should not be called many times because seems to generate code size bloat and we will not fit in the flash
+        display.clear();
+
+        static labels: [&str; MAX_COUNT] = ["Elore:  ", "Vissza: ", "Padlo:  ", "Levego: "];
+
+        for i in 0..4 as u8 {
+            print_temp(
+                &mut display,
+                i,
+                labels[i as usize],
+                &temp_sensors[i as usize],
+            );
+        }
+
+        display.set_position(0, 4);
+        display.print(status_text);
+
         print_temp(
             &mut display,
             5,
@@ -388,18 +371,17 @@ fn main() -> ! {
             &floor_heating_config.target_air_temperature,
         );
     }
-
-    //writeln!(hstdout, "end").unwrap();
 }
 
 exception!(HardFault, hard_fault);
 
 fn hard_fault(ef: &ExceptionFrame) -> ! {
-    panic!("HardFault at {:#?}", ef);
+    loop {}
+    //panic!("HardFault at {:#?}", ef); //removed due to large code size
 }
 
 exception!(*, default_handler);
 
 fn default_handler(irqn: i16) {
-    panic!("Unhandled exception (IRQn = {})", irqn);
+    //panic!("Unhandled exception (IRQn = {})", irqn);  //removed due to large code size
 }

@@ -47,4 +47,5 @@ version = "0.2.0"
 [profile.release]
 codegen-units = 1 # better optimizations
 debug = true
-lto = true # better optimizations
+lto = true # better optimizations # turn this off to win flash space, but will break onewire timing, need readjust
+#panic ='abort'
