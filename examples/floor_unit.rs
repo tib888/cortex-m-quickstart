@@ -12,10 +12,12 @@
 //!   PA5 = Display SPI clock
 //!   PA6 = Display SPI input - not used
 //!   PA7 = Display SPI data
-//!   PA4 = Display Data/Command
-//!   PA3 = Display Chip Select
-//!   PA1 = Display Reset
-//! TODO drive backlight too with a transistor?
+//!   PA3 = Display Data/Command^
+//!   PA2 = Display Chip Select^ - if SPI is not shared this could be constantly pulled to GND
+//!   PA1 = Display Reset^ - this could be connected to the 5v with a resistor and to the Gnd with a capacitor
+//!   B12 = Display Backlight^ (with a PNP transistor) - use open drain output!
+//!
+//! TODO heat request relay
 //!
 //! The remote changes the default config, the state displayed on the rgb led.
 //! Controls the floor heating accordig to the config.
@@ -115,9 +117,9 @@ fn main() -> ! {
 
     // RGB led:
     let mut rgb = RgbLed::new(
-        gpiob.pb13.into_push_pull_output(&mut gpiob.crh),
-        gpiob.pb14.into_push_pull_output(&mut gpiob.crh),
-        gpiob.pb15.into_push_pull_output(&mut gpiob.crh),
+        gpiob.pb13.into_open_drain_output(&mut gpiob.crh),
+        gpiob.pb14.into_open_drain_output(&mut gpiob.crh),
+        gpiob.pb15.into_open_drain_output(&mut gpiob.crh),
     );
 
     // on board led^:
@@ -153,9 +155,12 @@ fn main() -> ! {
     );
 
     // other pins for PCD8544
-    let dc = gpioa.pa4.into_push_pull_output(&mut gpioa.crl); // PA4 = Display Data/Command
-    let cs = gpioa.pa3.into_push_pull_output(&mut gpioa.crl); // PA3 = Display Chip Select
-    let mut rst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl); // PA1 = Display Reset
+    let mut backlight = gpiob.pb12.into_open_drain_output(&mut gpiob.crh); //PB12 Display backlight^
+    backlight.set_low();
+
+    let dc = gpioa.pa3.into_push_pull_output(&mut gpioa.crl); // PA4 = Display Data/Command^
+    let cs = gpioa.pa2.into_push_pull_output(&mut gpioa.crl); // PA3 = Display ChipSelect^
+    let mut rst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl); // PA1 = Display Reset^
 
     let mut delay = Delay::new(cp.SYST, clocks);
     let mut display = Pcd8544Spi::new(spi, dc, cs, &mut rst, &mut delay);
@@ -218,7 +223,8 @@ fn main() -> ! {
             }
 
             Err(_e) => {
-                rgb.color(Colors::Cyan);
+                rgb.color(Colors::White);
+                break;
             }
         }
     }
@@ -229,13 +235,22 @@ fn main() -> ! {
 
     let mut last_time = tick.now();
 
+    let mut backlight_timeout = 5u32;
+
     loop {
         //TODO: feed the watchdog
+
+        //update the IR receiver statemachine:
         let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
 
         match ir_cmd {
             Ok(ir::NecContent::Repeat) => {}
             Ok(ir::NecContent::Data(data)) => {
+                backlight.set_low(); //turn on
+                backlight_timeout = 20;
+
+                //TODO Add a reset command! (rescan temp sensors, reset display at least)
+
                 floor_heating_config.target_air_temperature = match data >> 8 {
                     0x807F80 => Some(Temperature::from_celsius(20, 0)), //0
                     0x807F72 => Some(Temperature::from_celsius(21, 0)), //1
@@ -281,10 +296,17 @@ fn main() -> ! {
 
         led.toggle();
 
+        if backlight_timeout > 0 {
+            backlight_timeout -= 1;
+            if backlight_timeout == 0 {
+                backlight.set_high(); //turn off
+            }
+        }
+
         // decrease the time resolution
         let delta_time = Duration::sec(delta.count / tick.frequency);
 
-        // keep the difference measurement is accurate by keeping the fractions...
+        // keep the difference measurement accurate by keeping the fractions...
         last_time = last_time + Duration::<Ticks>::from(delta_time.count * tick.frequency);
 
         //read sensors and restart temperature measurement
@@ -342,7 +364,7 @@ fn main() -> ! {
             }
             floor_heating::State::Error => {
                 //CAN: sensor missing error
-                rgb.color(Colors::White);
+                rgb.color(Colors::Cyan);
                 "Szenzorhiba"
             }
         };
@@ -350,13 +372,13 @@ fn main() -> ! {
         //note: display.print(...) should not be called many times because seems to generate code size bloat and we will not fit in the flash
         display.clear();
 
-        static labels: [&str; MAX_COUNT] = ["Elore:  ", "Vissza: ", "Padlo:  ", "Levego: "];
+        static LABELS: [&str; MAX_COUNT] = ["Elore:  ", "Vissza: ", "Padlo:  ", "Levego: "];
 
         for i in 0..4 as u8 {
             print_temp(
                 &mut display,
                 i,
-                labels[i as usize],
+                LABELS[i as usize],
                 &temp_sensors[i as usize],
             );
         }
@@ -375,13 +397,13 @@ fn main() -> ! {
 
 exception!(HardFault, hard_fault);
 
-fn hard_fault(ef: &ExceptionFrame) -> ! {
+fn hard_fault(_ef: &ExceptionFrame) -> ! {
     loop {}
     //panic!("HardFault at {:#?}", ef); //removed due to large code size
 }
 
 exception!(*, default_handler);
 
-fn default_handler(irqn: i16) {
+fn default_handler(_irqn: i16) {
     //panic!("Unhandled exception (IRQn = {})", irqn);  //removed due to large code size
 }
