@@ -19,7 +19,7 @@
 //!
 //! PA11, PA12 = CAN RX, TX
 //!
-//! TODO heat request relay
+//! Heat request signal (open collector NPN transistor) on B11
 //!
 //! The remote changes the default config, the state displayed on the rgb led.
 //! Controls the floor heating accordig to the config.
@@ -44,10 +44,12 @@ extern crate stm32f103xx_hal as hal;
 
 //use core::fmt::Write;
 use embedded_hal::spi;
+use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use hal::delay::Delay;
 use hal::prelude::*;
 use hal::spi::Spi;
 use hal::stm32f103xx;
+use hal::watchdog::IndependentWatchdog;
 use ir::NecReceiver;
 use onewire::ds18x20::*;
 use onewire::temperature::Temperature;
@@ -105,10 +107,12 @@ fn print_temp<T: Pcd8544>(display: &mut T, row: u8, prefix: &str, temp: &Option<
 }
 
 fn main() -> ! {
-    //let mut hstdout = hio::hstdout().unwrap();
-
-    let cp = cortex_m::Peripherals::take().unwrap();
     let dp = stm32f103xx::Peripherals::take().unwrap();
+    let mut watchdog = IndependentWatchdog::new(dp.IWDG);
+    watchdog.start(2_000_000u32.us());
+
+    //let mut hstdout = hio::hstdout().unwrap();
+    let cp = cortex_m::Peripherals::take().unwrap();
 
     let mut rcc = dp.RCC.constrain();
 
@@ -126,6 +130,8 @@ fn main() -> ! {
         gpiob.pb15.into_open_drain_output(&mut gpiob.crh),
     );
 
+    let mut heat_request = gpiob.pb11.into_push_pull_output(&mut gpiob.crh);
+
     // on board led^:
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
@@ -138,6 +144,8 @@ fn main() -> ! {
     let mut flash = dp.FLASH.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
     let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
+
+    watchdog.feed();
 
     // setup SPI for the PCD8544 display:
     let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl); //PA5 = Display SPI clock
@@ -170,6 +178,8 @@ fn main() -> ! {
     let mut display = Pcd8544Spi::new(spi, dc, cs, &mut rst, &mut delay);
     display.init();
 
+    watchdog.feed();
+
     // setup the one wire thermometers:
     // free PB3, PB4 from JTAG to be used as GPIO:
     afio.mapr
@@ -177,6 +187,8 @@ fn main() -> ! {
         .modify(|_, w| unsafe { w.swj_cfg().bits(1) });
     let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
     let mut one_wire = OneWirePort::new(io, delay);
+
+    watchdog.feed();
 
     let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 
@@ -205,7 +217,6 @@ fn main() -> ! {
     //let canrx = gpiob.pb8.into_floating_input(&mut gpiob.crh);
     //let cantx = gpiob.pb9.into_alternate_push_pull(&mut gpiob.crh);
 
-    let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
     //USB is needed here because it can not be used at the same time as CAN since they share memory:
     let mut can = Can::can1(
         dp.CAN,
@@ -239,6 +250,8 @@ fn main() -> ! {
     let (mut tx0, mut tx1, mut tx2) = tx.split();
     let (mut rx0, mut rx1) = rx.split();
 
+    watchdog.feed();
+
     let mut floor_heating_state = floor_heating::State::Standby(Duration::sec(0));
 
     //this config will be updated by IR remote or CAN messages
@@ -264,7 +277,10 @@ fn main() -> ! {
     let mut count = 0;
 
     let mut it = RomIterator::new(0);
+
     loop {
+        watchdog.feed();
+
         match one_wire.iterate_next(true, &mut it) {
             Ok(None) => {
                 break; //no or no more devices found -> stop
@@ -299,7 +315,7 @@ fn main() -> ! {
     let mut backlight_timeout = 5u32;
 
     loop {
-        //TODO: feed the watchdog
+        watchdog.feed();
 
         //receive and process can messages
         if let Ok((filter_match_index, time, frame)) = rx0.read() {
@@ -316,7 +332,7 @@ fn main() -> ! {
             match filter_match_index {
                 0 => assert!(*frame.id() == can_reconfigure_id), //TODO decode new config
                 1 => assert!(*frame.id() == can_ask_status_id),  //TODO send status on can
-                _ => panic!("unexpected"),
+                _ => {} //panic!("unexpected"),
             }
         };
 
@@ -428,6 +444,7 @@ fn main() -> ! {
             floor_heating::State::Heating(defreeze) => {
                 valve.open();
                 pump.start();
+                heat_request.set_high();
                 //CAN: heat request
                 if defreeze {
                     rgb.color(Colors::Purple);
@@ -440,6 +457,7 @@ fn main() -> ! {
             floor_heating::State::AfterCirculation(_) => {
                 valve.close();
                 pump.start();
+                heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Yellow);
                 "Utokeringetes"
@@ -447,6 +465,7 @@ fn main() -> ! {
             floor_heating::State::Standby(_) => {
                 valve.close();
                 pump.stop();
+                heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Green);
                 "Keszenlet"
@@ -454,6 +473,7 @@ fn main() -> ! {
             floor_heating::State::FreezeProtectionCheckCirculation(_) => {
                 valve.close();
                 pump.start();
+                heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Blue);
                 "Fagyvizsgalat"
