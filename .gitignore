@@ -3,7 +3,8 @@
 .gdb_history
 Cargo.lock
 target/
-*.bat
+ocd.bat
+run*.bat
 stlink-v2.cfg
 stm32f1x.cfg
 .gdbinit

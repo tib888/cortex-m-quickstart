@@ -8,11 +8,10 @@
 //! Solid state relay 1 connected to B6 drives the valve
 //! Solid state relay 2 connected to B7 drives the pump
 //!
-//! pcd8544 lcd display conected to SPI1 and some gpio port:
+//! Hx1230 lcd display conected to SPI1 and some gpio port:
 //!   PA5 = Display SPI clock
 //!   PA6 = Display SPI input - not used
 //!   PA7 = Display SPI data
-//!   PA3 = Display Data/Command^
 //!   PA2 = Display Chip Select^ - if SPI is not shared this could be constantly pulled to GND
 //!   PA1 = Display Reset^ - this could be connected to the 5v with a resistor and to the Gnd with a capacitor
 //!   B12 = Display Backlight^ (with a PNP transistor) - use open drain output!
@@ -47,16 +46,14 @@ extern crate stm32f103xx_hal as hal;
 //extern crate stm32f103xx_rtc as rtc;
 
 //use core::fmt::Write;
-use embedded_hal::spi;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use hal::delay::Delay;
 use hal::prelude::*;
-use hal::spi::Spi;
 use hal::stm32f103xx;
 use hal::watchdog::IndependentWatchdog;
 use ir::NecReceiver;
-use lcd_hal::pcd8544::Pcd8544;
-use lcd_hal::{pcd8544, Display};
+use lcd_hal::hx1230::Hx1230;
+use lcd_hal::{hx1230, Display};
 use onewire::ds18x20::*;
 use onewire::temperature::Temperature;
 use onewire::*;
@@ -180,34 +177,18 @@ fn main() -> ! {
     watchdog.feed();
 
     // setup SPI for the PCD8544 display:
-    let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl); //PA5 = Display SPI clock
-    let miso = gpioa.pa6.into_floating_input(&mut gpioa.crl); //PA6 = Display SPI input - not used
-    let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl); //PA7 = Display SPI data
-    let spi_mode = spi::Mode {
-        phase: spi::Phase::CaptureOnFirstTransition,
-        polarity: spi::Polarity::IdleLow,
-    };
-
-    let spi = Spi::spi1(
-        dp.SPI1,
-        (sck, miso, mosi),
-        &mut afio.mapr,
-        spi_mode,
-        4.mhz(),
-        clocks,
-        &mut rcc.apb2,
-    );
+    let sck = gpioa.pa5.into_push_pull_output(&mut gpioa.crl); //PA5 = Display SPI clock
+    let mosi = gpioa.pa7.into_push_pull_output(&mut gpioa.crl); //PA7 = Display SPI data
 
     // other pins for PCD8544
     let mut backlight = gpiob.pb12.into_open_drain_output(&mut gpiob.crh); //PB12 Display backlight^
     backlight.set_low();
 
-    let dc = gpioa.pa3.into_push_pull_output(&mut gpioa.crl); // PA4 = Display Data/Command^
     let cs = gpioa.pa2.into_push_pull_output(&mut gpioa.crl); // PA3 = Display ChipSelect^
     let mut rst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl); // PA1 = Display Reset^
 
     let mut delay = Delay::new(cp.SYST, clocks);
-    let mut display = pcd8544::spi::Pcd8544Spi::new(spi, dc, cs, &mut rst, &mut delay);
+    let mut display = hx1230::gpio::Hx1230Gpio::new(sck, mosi, cs, &mut rst, &mut delay);
     display.init();
 
     watchdog.feed();
