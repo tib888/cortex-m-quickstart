@@ -35,7 +35,6 @@ extern crate cortex_m_semihosting as sh;
 #[macro_use]
 extern crate stm32f103xx as device;
 extern crate embedded_hal;
-//extern crate heapless;
 extern crate ir;
 extern crate lcd_hal;
 extern crate nb;
@@ -43,12 +42,13 @@ extern crate onewire;
 extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
-//extern crate stm32f103xx_rtc as rtc;
 
-//use core::fmt::Write;
+//use sh::hio;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
+use hal::can::*;
 use hal::delay::Delay;
 use hal::prelude::*;
+use hal::rtc;
 use hal::stm32f103xx;
 use hal::watchdog::IndependentWatchdog;
 use ir::NecReceiver;
@@ -63,13 +63,8 @@ use room_pill::rgb::*;
 use room_pill::time::*;
 use room_pill::valve::*;
 use rt::ExceptionFrame;
-//use sh::hio;
-
-use hal::can::*;
 
 entry!(main);
-
-//static mut RTC_DEVICE: Option<rtc::Rtc> = None;
 
 fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<Temperature>) {
     display.set_position(0, row);
@@ -80,10 +75,7 @@ fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<
         display.print_char(if t < 0 { '-' } else { ' ' } as u8);
 
         let t: u8 = t.abs() as u8;
-        if t > 9 {
-            display.print_char('0' as u8 + (t / 10));
-        }
-        display.print_char('0' as u8 + (t % 10));
+        print_nn(display, t);
         display.print_char('.' as u8);
 
         //round fraction to one digit:
@@ -103,15 +95,59 @@ fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<
         // 13	0.813
         // 14	0.875
         // 15	0.938
-        static ROUND_TABLE: &[u8] = b"0112334456678899";
-        display.print_char(ROUND_TABLE[temp.fraction_degrees() as usize]);
+        static ROUND_TABLE1: &[u8] = b"0011233455667889";
+        static ROUND_TABLE2: &[u8] = b"0639518406395184";
+        display.print_char(ROUND_TABLE1[temp.fraction_degrees() as usize]);
+        display.print_char(ROUND_TABLE2[temp.fraction_degrees() as usize]);
     } else {
-        display.print("-----");
+        display.print(" -----");
     }
 }
 
+fn print_nn<T: Display>(display: &mut T, n: u8) {
+    assert!(n < 100);
+    display.print_char('0' as u8 + (n / 10u8));
+    display.print_char('0' as u8 + (n % 10u8));
+}
+
+fn print_time<T: Display>(display: &mut T, t: u32) {
+    display.set_position(0, 0);
+    let day = t as u32 / (60 * 60 * 24);
+    let t = t - day * (60 * 60 * 24);
+    let hour = t / (60 * 60);
+    let t = t - hour * (60 * 60);
+    let min = t / 60;
+    let _sec = t - min * 60;
+    let weekday = day % 7;
+
+    print_nn(display, hour as u8);
+    display.print_char(':' as u8);
+    print_nn(display, min as u8);
+    display.print_char(' ' as u8);
+
+    static WEEKDAYS: [&str; 7] = [
+        "Hetfo    ",
+        "Kedd     ",
+        "Szerda   ",
+        "Csutortok",
+        "Pentek   ",
+        "Szombat  ",
+        "Vasarnap ",
+    ];
+    display.print(WEEKDAYS[weekday as usize]);
+
+    //TODO print real date
+    //display.print("2018-11-22 23:11");
+
+    //let mut datetime = heapless::String::<heapless::consts::U16>::new();
+    //if let Ok(_) = writeln!(datetime, "{}", rtc.get_cnt()) {
+    //    display.set_position(0, 0);
+    //    display.print(&datetime);
+    //}
+}
+
 fn main() -> ! {
-    let dp = stm32f103xx::Peripherals::take().unwrap();
+    let mut dp = stm32f103xx::Peripherals::take().unwrap();
     let mut watchdog = IndependentWatchdog::new(dp.IWDG);
     watchdog.start(2_000_000u32.us());
 
@@ -125,29 +161,7 @@ fn main() -> ! {
     let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
 
     // real time clock
-    // let mut rtc = rtc::Rtc::new(dp.RTC, &mut rcc.apb1, &mut dp.PWR);
-
-    // if rtc.get_cnt() < 100 {
-    //     let today = rtc::datetime::DateTime {
-    //         year: 2018,
-    //         month: 11,
-    //         day: 21,
-    //         hour: 16,
-    //         min: 45,
-    //         sec: 0,
-    //         day_of_week: rtc::datetime::DayOfWeek::Wednesday,
-    //     };
-    //     if let Some(epoch) = today.to_epoch() {
-    //         rtc.set_cnt(epoch);
-    //     }
-    // }
-    // unsafe {
-    //     RTC_DEVICE = Some(rtc);
-    //     RTC_DEVICE
-    //         .as_mut()
-    //         .unwrap()
-    //         .enable_second_interrupt(&mut cp.NVIC);
-    // }
+    let mut rtc = rtc::Rtc::new(dp.RTC, &mut rcc.apb1, &mut dp.PWR);
 
     // IR receiver^
     let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
@@ -190,6 +204,11 @@ fn main() -> ! {
     let mut delay = Delay::new(cp.SYST, clocks);
     let mut display = hx1230::gpio::Hx1230Gpio::new(sck, mosi, cs, &mut rst, &mut delay);
     display.init();
+    display.set_contrast(7);
+
+    //rotate the screen with 180 degree:
+    //display.flip_horizontal(true);
+    //display.flip_vertical(true);
 
     watchdog.feed();
 
@@ -325,7 +344,7 @@ fn main() -> ! {
 
     let mut last_time = tick.now();
 
-    let mut backlight_timeout = 5u32;
+    let mut backlight_timeout = 60u32;
 
     loop {
         watchdog.feed();
@@ -364,6 +383,22 @@ fn main() -> ! {
 
                 //TODO Add a reset command! (rescan temp sensors, reset display at least)
 
+                //set clock:
+                let dt = match data >> 8 {
+                    0x807F9A => 24 * 60 * 60, //set
+                    0x807F1A => 60 * 60,      //tv in
+                    0x807FEA => 60,           //tv vol-
+                    0x807F6A => 1,            //tv vol+
+                    _ => 0,
+                };
+
+                if dt != 0 {
+                    let t = rtc.get_cnt();
+                    rtc.set_cnt(t + dt);
+                    print_time(&mut display, rtc.get_cnt());
+                }
+
+                //set temperature:
                 floor_heating_config.target_air_temperature = match data >> 8 {
                     0x807F80 => Some(Temperature::from_celsius(20, 0)), //0
                     0x807F72 => Some(Temperature::from_celsius(21, 0)), //1
@@ -375,23 +410,23 @@ fn main() -> ! {
                     0x807F62 => Some(Temperature::from_celsius(17, 0)), //7
                     0x807FA0 => Some(Temperature::from_celsius(18, 0)), //8
                     0x807F20 => Some(Temperature::from_celsius(19, 0)), //9
-                    0x20F002 | 0x807F68 => floor_heating_config
+                    0x807F68 => floor_heating_config
                         .target_air_temperature
                         .map(|t| t + Temperature::from_celsius(0, 4)), //up +4/16 C
-                    0x20F082 | 0x807F58 => floor_heating_config
+                    0x807F58 => floor_heating_config
                         .target_air_temperature
                         .map(|t| t - Temperature::from_celsius(0, 4)), //down -4/16 C
-                    0x20F04E | 0x807FC2 => Some(Temperature::from_celsius(22, 0)), //red
-                    0x20F08E | 0x807FF0 => Some(Temperature::from_celsius(20, 0)), //green
-                    0x20F0C6 | 0x807F08 => Some(Temperature::from_celsius(18, 0)), //yellow
-                    0x20F086 | 0x807F18 => Some(Temperature::from_celsius(15, 0)), //blue
-                    0x20F022 | 0x807FC8 => None,                        //OK
+                    0x807FC2 => Some(Temperature::from_celsius(22, 0)), //red
+                    0x807FF0 => Some(Temperature::from_celsius(20, 0)), //green
+                    0x807F08 => Some(Temperature::from_celsius(18, 0)), //yellow
+                    0x807F18 => Some(Temperature::from_celsius(15, 0)), //blue
+                    0x807FC8 => None,                                   //OK
                     _ => floor_heating_config.target_air_temperature,   //etc.
                 };
                 rgb.color(Colors::Black);
                 print_temp(
                     &mut display,
-                    5,
+                    3,
                     "Cel:   >",
                     &floor_heating_config.target_air_temperature,
                 );
@@ -500,27 +535,32 @@ fn main() -> ! {
 
         //note: display.print(...) should not be called many times because seems to generate code size bloat and we will not fit in the flash
         display.clear();
+        watchdog.feed();
+        print_time(&mut display, rtc.get_cnt());
+
+        display.set_position(0, 2);
+        display.print(status_text);
+
+        print_temp(
+            &mut display,
+            3,
+            "Cel:    ",
+            &floor_heating_config.target_air_temperature,
+        );
 
         static LABELS: [&str; MAX_COUNT] = ["Elore:  ", "Vissza: ", "Padlo:  ", "Levego: "];
 
         for i in 0..4 as u8 {
             print_temp(
                 &mut display,
-                i,
+                4 + i,
                 LABELS[i as usize],
                 &temp_sensors[i as usize],
             );
         }
 
-        display.set_position(0, 4);
-        display.print(status_text);
-
-        print_temp(
-            &mut display,
-            5,
-            "Cel:    ",
-            &floor_heating_config.target_air_temperature,
-        );
+        //display.set_position(90, 7);
+        //display.print(" TTTTTTTTTTTTTTTT");
     }
 }
 
@@ -536,14 +576,3 @@ exception!(*, default_handler);
 fn default_handler(_irqn: i16) {
     //panic!("Unhandled exception (IRQn = {})", irqn);  //removed due to large code size
 }
-
-// interrupt!(RTC, rtc);
-
-// fn rtc() {
-//     let mut hstdout = sh::hio::hstdout().unwrap();
-//     let rtc = unsafe { RTC_DEVICE.as_mut().unwrap() };
-//     let mut s = heapless::String::<heapless::consts::U32>::new();
-//     writeln!(s, "{}", rtc::datetime::DateTime::new(rtc.get_cnt())).unwrap();
-//     hstdout.write_str(&s).unwrap();
-//     rtc.clear_second_interrupt();
-// }
