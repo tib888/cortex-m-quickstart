@@ -13,3 +13,4 @@ pub mod pump;
 pub mod rgb;
 pub mod time;
 pub mod valve;
+pub mod week_time;
