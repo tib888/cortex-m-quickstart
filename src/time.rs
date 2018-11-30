@@ -82,6 +82,21 @@ pub struct Time<UNIT> {
     pub unit: PhantomData<UNIT>,
 }
 
+impl<UNIT> PartialEq for Time<UNIT> {
+    fn eq(&self, other: &Time<UNIT>) -> bool {
+        self.instant == other.instant
+    }
+}
+
+impl<UNIT> From<u32> for Time<UNIT> {
+    fn from(original: u32) -> Time<UNIT> {
+        Time::<UNIT> {
+            instant: original,
+            unit: PhantomData::<UNIT>,
+        }
+    }
+}
+
 impl From<u32> for Duration<Ticks> {
     fn from(original: u32) -> Duration<Ticks> {
         Duration::<Ticks> {
