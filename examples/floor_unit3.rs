@@ -42,7 +42,7 @@ extern crate room_pill;
 extern crate stm32f103xx as device;
 extern crate stm32f103xx_hal as hal;
 
-use core::fmt::Write;
+//use core::fmt::Write;
 use core::marker::PhantomData;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use hal::can::*;
@@ -52,7 +52,7 @@ use hal::rtc;
 use hal::stm32f103xx;
 use hal::watchdog::IndependentWatchdog;
 use ir::NecReceiver;
-use lcd_hal::{hx1230, hx1230::Hx1230, Display};
+use lcd_hal::{hx1230, hx1230::Hx1230};
 use onewire::ds18x20::*;
 use onewire::temperature::Temperature;
 use onewire::*;
@@ -63,7 +63,7 @@ use room_pill::time::{Duration, Seconds, Ticker, Ticks, Time};
 use room_pill::valve::*;
 use room_pill::week_time::*;
 use rt::ExceptionFrame;
-use sh::hio; //
+//use sh::hio; //
 
 #[derive(Debug, PartialEq)]
 enum IR_Commands {
@@ -127,31 +127,227 @@ struct TreeNode<'a, M> {
     content: TreeContent<'a, M>,
 }
 
-fn dummy_update(_model: &mut Model, _command: IR_Commands) {
-    //TODO delete this later
-}
-fn dummy_view(_model: &Model) -> &'static [u8] {
-    b"*dummy*" //TODO delete this later
-}
+static MENU: SubTree<Model> = SubTree {
+    items: &[
+        TreeNode {
+            text: b"Set Clock",
+            content: TreeContent::SubTree(SubTree {
+                items: &[
+                    TreeNode {
+                        text: b"Nap",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_time_weekday,
+                            view: view_time_weekday,
+                        }),
+                    },
+                    TreeNode {
+                        text: b"Ora",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_time_hour,
+                            view: view_time_hour,
+                        }),
+                    },
+                    TreeNode {
+                        text: b"Perc",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_time_min,
+                            view: view_time_min,
+                        }),
+                    },
+                ],
+            }),
+        },
+        TreeNode {
+            text: b"Program",
+            content: TreeContent::SubTree(SubTree {
+                items: &[
+                    TreeNode {
+                        text: b"Nap",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_program_day_index,
+                            view: view_program_day_index,
+                        }),
+                    },
+                    TreeNode {
+                        text: b"Program",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_program_index,
+                            view: view_program_index,
+                        }),
+                    },
+                    TreeNode {
+                        text: b"Start ora",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_program_start_hour,
+                            view: view_program_start_hour,
+                        }),
+                    },
+                    TreeNode {
+                        text: b"Start perc",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_program_start_min,
+                            view: view_program_start_min,
+                        }),
+                    },
+                    TreeNode {
+                        text: b"Hofok",
+                        content: TreeContent::Leaf(Leaf {
+                            update: set_program_target_temp,
+                            view: view_program_target_temp,
+                        }),
+                    },
+                ],
+            }),
+        },
+        // TreeNode {
+        //     text: b"Config",
+        //     content: TreeContent::Leaf(Leaf {
+        //         update: dummy_update,
+        //         view: dummy_view,
+        //     }),
+        // },
+        // TreeNode {
+        //     text: b"Reset", //TODO reset command: rescan temp sensors, reset display at least, but keeps program, config
+        //     content: TreeContent::Leaf(Leaf {
+        //         update: dummy_update,
+        //         view: dummy_view,
+        //     }),
+        // },
+    ],
+};
 
 fn set_time_weekday(model: &mut Model, command: IR_Commands) {
     match command {
         IR_Commands::Right => {
             model.weektime = WeekTime {
-                weekday: (model.weektime.weekday + 1) % 7,
+                weekday: (model.weektime.weekday + 1) % DAYS_PER_WEEK,
                 ..model.weektime
             };
             model.update_time_offset();
         }
-        IR_Commands::Down => {
+        IR_Commands::Left => {
             model.weektime = WeekTime {
-                weekday: (model.weektime.weekday - 1) % 7,
+                weekday: (model.weektime.weekday - 1) % DAYS_PER_WEEK,
                 ..model.weektime
             };
             model.update_time_offset();
         }
         _ => {}
     };
+}
+
+fn set_program_day_index(model: &mut Model, command: IR_Commands) {
+    match command {
+        IR_Commands::Right => {
+            model.programmed_index =
+                (model.programmed_index + PROGRAMS_PER_DAY) % (DAYS_PER_WEEK * PROGRAMS_PER_DAY);
+        }
+        IR_Commands::Left => {
+            model.programmed_index =
+                (model.programmed_index - PROGRAMS_PER_DAY) % (DAYS_PER_WEEK * PROGRAMS_PER_DAY);
+        }
+        _ => {}
+    };
+}
+fn set_program_index(model: &mut Model, command: IR_Commands) {
+    match command {
+        IR_Commands::Right => {
+            model.programmed_index =
+                if model.programmed_index % PROGRAMS_PER_DAY == PROGRAMS_PER_DAY - 1 {
+                    model.programmed_index - (PROGRAMS_PER_DAY - 1)
+                } else {
+                    model.programmed_index + 1
+                }
+        }
+        IR_Commands::Left => {
+            model.programmed_index = if model.programmed_index % PROGRAMS_PER_DAY == 0 {
+                model.programmed_index + (PROGRAMS_PER_DAY - 1)
+            } else {
+                model.programmed_index - 1
+            }
+        }
+        _ => {}
+    };
+}
+
+fn set_program_start_hour(model: &mut Model, command: IR_Commands) {
+    match command {
+        IR_Commands::Right => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                hour: (wt.hour + 1) % 24,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        IR_Commands::Left => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                hour: (wt.hour - 1) % 24,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        _ => {
+            return;
+        }
+    }
+}
+fn set_program_start_min(model: &mut Model, command: IR_Commands) {
+    match command {
+        IR_Commands::Right => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                min: (wt.min + 10) % 60,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        IR_Commands::Left => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                min: (wt.min - 10) % 60,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        _ => {
+            return;
+        }
+    }
+}
+fn set_program_target_temp(model: &mut Model, command: IR_Commands) {
+    match command {
+        IR_Commands::Right => {
+            model.program[model.programmed_index as usize].target_air_temperature =
+                model.program[model.programmed_index as usize].target_air_temperature
+                    + Temperature::from_celsius(0, 2);
+        }
+        IR_Commands::Left => {
+            model.program[model.programmed_index as usize].target_air_temperature =
+                model.program[model.programmed_index as usize].target_air_temperature
+                    - Temperature::from_celsius(0, 2);
+        }
+        _ => {
+            return;
+        }
+    }
+}
+
+fn view_program_day_index(model: &Model) -> &'static [u8] {
+    WEEKDAYS[(model.programmed_index / PROGRAMS_PER_DAY) as usize]
+}
+fn view_program_index(model: &Model) -> &'static [u8] {
+    fmt_nn(((model.programmed_index % PROGRAMS_PER_DAY) + 1) as u8)
+}
+fn view_program_start_hour(model: &Model) -> &'static [u8] {
+    fmt_nn(WeekTime::from(model.program[model.programmed_index as usize].start_time).hour)
+}
+fn view_program_start_min(model: &Model) -> &'static [u8] {
+    fmt_nn(WeekTime::from(model.program[model.programmed_index as usize].start_time).min)
+}
+fn view_program_target_temp(model: &Model) -> &'static [u8] {
+    fmt_temp(model.program[model.programmed_index as usize].target_air_temperature)
 }
 
 fn fmt_nn(n: u8) -> &'static [u8] {
@@ -164,13 +360,49 @@ fn fmt_nn(n: u8) -> &'static [u8] {
     }
 }
 
-fn weekday_view(model: &Model) -> &'static [u8] {
+fn fmt_temp(temp: Temperature) -> &'static [u8] {
+    static mut TEXT: [u8; 6] = [0u8; 6];
+
+    unsafe {
+        TEXT[0] = if temp.is_negative() { '-' } else { ' ' } as u8;
+
+        let t: u8 = temp.whole_degrees() as u8;
+        TEXT[1] = '0' as u8 + (t / 10u8);
+        TEXT[2] = '0' as u8 + (t % 10u8);
+        TEXT[3] = '.' as u8;
+
+        //round fraction to two digits:
+        // 0	0.000
+        // 1	0.063
+        // 2	0.125
+        // 3	0.188
+        // 4	0.250
+        // 5	0.313
+        // 6	0.375
+        // 7	0.438
+        // 8	0.500
+        // 9	0.563
+        // 10	0.625
+        // 11	0.688
+        // 12	0.750
+        // 13	0.813
+        // 14	0.875
+        // 15	0.938
+        static ROUND_TABLE1: &[u8] = b"0011233455667889";
+        static ROUND_TABLE2: &[u8] = b"0639518406395184";
+        TEXT[4] = ROUND_TABLE1[temp.fraction_degrees() as usize];
+        TEXT[5] = ROUND_TABLE2[temp.fraction_degrees() as usize];
+        &TEXT
+    }
+}
+
+fn view_time_weekday(model: &Model) -> &'static [u8] {
     WEEKDAYS[model.weektime.weekday as usize]
 }
-fn hour_view(model: &Model) -> &'static [u8] {
+fn view_time_hour(model: &Model) -> &'static [u8] {
     fmt_nn(model.weektime.hour)
 }
-fn minute_view(model: &Model) -> &'static [u8] {
+fn view_time_min(model: &Model) -> &'static [u8] {
     fmt_nn(model.weektime.min)
 }
 
@@ -182,7 +414,7 @@ fn set_time_hour(model: &mut Model, command: IR_Commands) {
                 ..model.weektime
             }
         }
-        IR_Commands::Down => {
+        IR_Commands::Left => {
             model.weektime = WeekTime {
                 hour: (model.weektime.hour - 1) % 24,
                 ..model.weektime
@@ -204,7 +436,7 @@ fn set_time_min(model: &mut Model, command: IR_Commands) {
                 ..model.weektime
             }
         }
-        IR_Commands::Down => {
+        IR_Commands::Left => {
             model.weektime = WeekTime {
                 min: (model.weektime.min - 1) % 60,
                 sec: 0,
@@ -218,7 +450,21 @@ fn set_time_min(model: &mut Model, command: IR_Commands) {
     model.update_time_offset();
 }
 
-const MAX_COUNT: usize = 4;
+const MAX_COUNT: usize = 4; //max numbert of thermometers
+const PROGRAMS_PER_DAY: u8 = 6;
+const DAYS_PER_WEEK: u8 = 7;
+
+enum ProgramModes {
+    Normal,               //everythig works as programmed
+    Economy(Temperature), //target temp = Normal + the given offset (which is negative)
+    Party(u8),            //temp override is kept until midnight of the stored week day
+    Away((u32, u8)),      //freeze protection will work for N days, until M hour)
+}
+
+struct ProgramEntry {
+    start_time: Time<Seconds>,
+    target_air_temperature: Temperature,
+}
 
 struct Model<'a, 'b> {
     //config:
@@ -226,16 +472,21 @@ struct Model<'a, 'b> {
     floor_heating_config: floor_heating::Config<Temperature, Duration<Seconds>>,
     backlight_timeout: Duration<Seconds>, //time in seconds before backlight tuns off
     time_offset: u32,                     //used for rtc to weektime calibration
+    program: [ProgramEntry; (DAYS_PER_WEEK * PROGRAMS_PER_DAY) as usize],
 
     //state:
+    mode: ProgramModes,
+
     floor_heating_state: floor_heating::State<Duration<Seconds>>,
     temperatures: [Option<Temperature>; MAX_COUNT],
     time: Time<Seconds>, //rtc based, ever increasing, in seconds
     weektime: WeekTime,  //redundant WeekTime::from(self.time + self.time_offset)
+    current_program_index: usize,
 
     //UI state:
     active_menu: Option<&'b SubTree<'a, Model<'a, 'b>>>,
     selected_item: usize,
+    programmed_index: u8,
 }
 
 impl<'a, 'b> Model<'a, 'b> {
@@ -257,11 +508,13 @@ impl<'a, 'b> Model<'a, 'b> {
             },
 
             //this config will be updated by IR remote or CAN messages
+            mode: ProgramModes::Economy(Temperature::from_celsius(-4, 0)),
+
             floor_heating_config: floor_heating::Config {
                 max_forward_temperature: Temperature::from_celsius(40, 0),
                 max_floor_temperature: Temperature::from_celsius(29, 0),
-                target_air_temperature: None, //Some(Temperature::from_celsius(19, 0)),
-                temperature_histeresis: Temperature::from_celsius(0, 1),
+                target_air_temperature: Some(Temperature::from_celsius(16, 0)),
+                temperature_histeresis: Temperature::from_celsius(0, 2),
                 freeze_protection: floor_heating::FreezeProtectionConfig {
                     min_temperature: Temperature::from_celsius(5, 0),
                     safe_temperature: Temperature::from_celsius(8, 0),
@@ -275,6 +528,184 @@ impl<'a, 'b> Model<'a, 'b> {
 
             time_offset: 0u32,
 
+            program: [
+                //monday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //tuesday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //wednesday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //thursday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //friday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 21, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //saturday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 11, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 21, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //sunday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 11, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+            ],
+
             floor_heating_state: floor_heating::State::Standby(Duration::sec(0)),
             temperatures: [None; MAX_COUNT],
             time: Time::<Seconds> {
@@ -282,9 +713,11 @@ impl<'a, 'b> Model<'a, 'b> {
                 unit: PhantomData::<Seconds>,
             },
             weektime: WeekTime::default(),
+            current_program_index: 0,
 
             active_menu: None,
             selected_item: 0,
+            programmed_index: 0,
         }
     }
 
@@ -329,6 +762,81 @@ impl<'a, 'b> Model<'a, 'b> {
         }
     }
 
+    fn search_current_program_index(&self) -> usize {
+        let mut idx = self.program.len() - 1;
+        let now = Time::<Seconds>::from(self.weektime);
+        for i in 0..self.program.len() {
+            if self.program[i].start_time.instant < now.instant {
+                idx = i;
+            } else {
+                break;
+            };
+        }
+        idx
+    }
+
+    fn update_programmed_target(&mut self) {
+        if let ProgramModes::Party(weekday) = self.mode {
+            //if we are in party mode,
+            if self.weektime.weekday != weekday {
+                //if midnight passed, return to normal mode
+                self.mode = ProgramModes::Normal;
+            } else {
+                //stay in party mode -> the user temperature override remains active
+                return;
+            }
+        }
+
+        let idx = self.search_current_program_index();
+
+        // //midnight passed:
+        // if WeekTime::from(self.program[self.current_program_index].start_time).weekday
+        //     != self.weektime.weekday
+        // {
+        //     match self.mode {
+        //         ProgramModes::Away((days, hour)) => {
+        //             self.current_program_index = idx;
+        //             self.mode = ProgramModes::Away((days - 1, hour)); //decrease the remaining time
+        //             self.floor_heating_config.target_air_temperature = if days > 0 {
+        //                 //keep defreeze state
+        //                 None
+        //             } else {
+        //                 //on the last day keep normal - 4 degree
+        //                 Some(
+        //                     self.program[idx].target_air_temperature
+        //                         - Temperature::from_celsius(4, 0),
+        //                 )
+        //             };
+        //             return;
+        //         }
+        //         _ => {}
+        //     }
+        // } else {
+        //     if let ProgramModes::Away((days, hour)) = self.mode {
+        //         if days < 1 && self.weektime.hour >= hour {
+        //             //in away mode on thelast day, at the given hour return to normal mode
+        //             self.mode = ProgramModes::Normal;
+        //         } else {
+        //             return;
+        //         }
+        //     }
+        // }
+
+        //the user override lives until program change:
+        if self.current_program_index != idx {
+            self.current_program_index = idx;
+
+            let offset = if let ProgramModes::Economy(offset) = self.mode {
+                offset
+            } else {
+                Temperature::from_celsius(0, 0)
+            };
+
+            self.floor_heating_config.target_air_temperature =
+                Some(self.program[idx].target_air_temperature + offset);
+        }
+    }
+
     //update by IR remote
     fn ir_remote_command(
         &mut self,
@@ -369,9 +877,78 @@ impl<'a, 'b> Model<'a, 'b> {
                     }
                 }
             }
-        } else if IR_Commands::Menu == command {
-            self.active_menu = Some(root_menu);
-            self.selected_item = 0;
+        } else {
+            match command {
+                IR_Commands::Menu => {
+                    self.active_menu = Some(root_menu);
+                    self.selected_item = 0;
+                }
+                IR_Commands::Right => {
+                    self.floor_heating_config.target_air_temperature = if let Some(target_temp) =
+                        self.floor_heating_config.target_air_temperature
+                    {
+                        Some(target_temp + Temperature::from_celsius(0, 1))
+                    } else {
+                        Some(Temperature::from_celsius(20, 0))
+                    };
+                }
+                IR_Commands::Left => {
+                    self.floor_heating_config.target_air_temperature = if let Some(target_temp) =
+                        self.floor_heating_config.target_air_temperature
+                    {
+                        Some(target_temp - Temperature::from_celsius(0, 1))
+                    } else {
+                        Some(Temperature::from_celsius(20, 0))
+                    };
+                }
+                IR_Commands::Backspace => {
+                    self.floor_heating_config.target_air_temperature = None;
+                }
+                IR_Commands::Red => {
+                    self.mode = ProgramModes::Party(self.weektime.weekday);
+                    self.current_program_index += 1; //just  for triggering a refresh
+                }
+                IR_Commands::Green => {
+                    self.mode =
+                        ProgramModes::Economy(if let ProgramModes::Economy(offset) = self.mode {
+                            offset
+                        } else {
+                            Temperature::from_celsius(-2, 0)
+                        });
+                    self.current_program_index += 1; //just  for triggering a refresh
+                }
+                IR_Commands::Yellow => {
+                    self.mode = ProgramModes::Normal;
+                    self.current_program_index += 1; //just  for triggering a refresh
+                }
+                IR_Commands::Blue => {
+                    // self.mode = if let ProgramModes::Away((days, hour)) = self.mode {
+                    //     ProgramModes::Away((days, (hour + 1) % 24))
+                    // } else {
+                    //     ProgramModes::Away((1, self.weektime.hour.into()))
+                    // };
+                    // self.model.current_program_index += 1;//just  for triggering a refresh
+                }
+                IR_Commands::Up => match self.mode {
+                    ProgramModes::Away((days, hour)) => {
+                        self.mode = ProgramModes::Away((days + 1, hour))
+                    }
+                    ProgramModes::Economy(offset) => {
+                        self.mode = ProgramModes::Economy(offset + Temperature::from_celsius(0, 1))
+                    }
+                    _ => {}
+                },
+                IR_Commands::Down => match self.mode {
+                    ProgramModes::Away((days, hour)) => {
+                        self.mode = ProgramModes::Away((if days > 0 { days - 1 } else { 0 }, hour))
+                    }
+                    ProgramModes::Economy(offset) => {
+                        self.mode = ProgramModes::Economy(offset - Temperature::from_celsius(0, 1))
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
         }
     }
 
@@ -402,6 +979,10 @@ impl<'a, 'b> Model<'a, 'b> {
                 0
             };
 
+            let (cols, _) = display.get_char_resolution();
+            let (colsx, _) = display.get_pixel_resolution();
+            let colc = colsx / cols;
+
             for row in 0..rows {
                 let index = row + start_index;
                 if index >= active_menu.items.len() {
@@ -419,7 +1000,9 @@ impl<'a, 'b> Model<'a, 'b> {
 
                 if let TreeContent::Leaf(ref leaf) = active_menu.items[index].content {
                     display.print_char(':' as u8);
-                    display.print((leaf.view)(self));
+                    let content = (leaf.view)(self);
+                    display.set_position(colsx - colc * content.len() as u8, row as u8);
+                    display.print(content);
                 }
             }
         } else {
@@ -428,6 +1011,27 @@ impl<'a, 'b> Model<'a, 'b> {
 
             display.set_position(0, 0);
             print_time(display, self.weektime);
+
+            display.set_position(0, 1);
+            match self.mode {
+                ProgramModes::Normal => {
+                    display.print(b"Normal");
+                }
+                ProgramModes::Economy(offset) => {
+                    display.print(b"Eco ");
+                    display.print(fmt_temp(offset));
+                }
+                ProgramModes::Party(_day) => {
+                    display.print(b"Party");
+                }
+                ProgramModes::Away((days, hour)) => {
+                    display.print(b"Tavol ");
+                    print_nnn(display, days);
+                    display.print(b"d ");
+                    print_nn(display, hour);
+                    display.print(b":00");
+                }
+            };
 
             print_temp(
                 display,
@@ -466,119 +1070,43 @@ fn print_temp<D: lcd_hal::Display>(
     display.print(prefix);
 
     if let Some(temp) = temp {
-        let t = temp.whole_degrees();
-        display.print_char(if t < 0 { '-' } else { ' ' } as u8);
-
-        let t: u8 = t.abs() as u8;
-        print_nn(display, t);
-        display.print_char('.' as u8);
-
-        //round fraction to one digit:
-        // 0	0.000
-        // 1	0.063
-        // 2	0.125
-        // 3	0.188
-        // 4	0.250
-        // 5	0.313
-        // 6	0.375
-        // 7	0.438
-        // 8	0.500
-        // 9	0.563
-        // 10	0.625
-        // 11	0.688
-        // 12	0.750
-        // 13	0.813
-        // 14	0.875
-        // 15	0.938
-        static ROUND_TABLE1: &[u8] = b"0011233455667889";
-        static ROUND_TABLE2: &[u8] = b"0639518406395184";
-        display.print_char(ROUND_TABLE1[temp.fraction_degrees() as usize]);
-        display.print_char(ROUND_TABLE2[temp.fraction_degrees() as usize]);
+        display.print(fmt_temp(*temp));
     } else {
         display.print(b" -----");
     }
 }
 
 fn print_nn<D: lcd_hal::Display>(display: &mut D, n: u8) {
-    assert!(n < 100);
-    display.print_char('0' as u8 + (n / 10u8));
-    display.print_char('0' as u8 + (n % 10u8));
+    //assert!(n < 100);
+    display.print(fmt_nn(n));
+}
+
+fn print_nnn<D: lcd_hal::Display>(display: &mut D, n: u32) {
+    assert!(n < 1000);
+    let a = n / 100;
+    display.print_char('0' as u8 + a as u8);
+    print_nn(display, (n - (a * 100)) as u8);
 }
 
 pub static WEEKDAYS: [&[u8]; 7] = [
-    b"Hetfo    ",
-    b"Kedd     ",
-    b"Szerda   ",
+    b"Hetfo",
+    b"Kedd",
+    b"Szerda",
     b"Csutortok",
-    b"Pentek   ",
-    b"Szombat  ",
-    b"Vasarnap ",
+    b"Pentek",
+    b"Szombat",
+    b"Vasarnap",
 ];
 
 fn print_time<D: lcd_hal::Display>(display: &mut D, t: WeekTime) {
+    display.print(WEEKDAYS[t.weekday as usize]);
+    display.print_char(' ' as u8);
     print_nn(display, t.hour);
     display.print_char(':' as u8);
     print_nn(display, t.min);
-    display.print_char(' ' as u8);
-    display.print(WEEKDAYS[t.weekday as usize]);
 }
 
 fn main() -> ! {
-    let menu = SubTree {
-        items: &[
-            TreeNode {
-                text: b"Program",
-                content: TreeContent::Leaf(Leaf {
-                    update: dummy_update,
-                    view: dummy_view,
-                }),
-            },
-            TreeNode {
-                text: b"Set Clock",
-                content: TreeContent::SubTree(SubTree {
-                    items: &[
-                        TreeNode {
-                            text: b"Weekday",
-                            content: TreeContent::Leaf(Leaf {
-                                update: set_time_weekday,
-                                view: weekday_view,
-                            }),
-                        },
-                        TreeNode {
-                            text: b"Hour",
-                            content: TreeContent::Leaf(Leaf {
-                                update: set_time_hour,
-                                view: hour_view,
-                            }),
-                        },
-                        TreeNode {
-                            text: b"Min",
-                            content: TreeContent::Leaf(Leaf {
-                                update: set_time_min,
-                                view: minute_view,
-                            }),
-                        },
-                    ],
-                }),
-            },
-            TreeNode {
-                text: b"Config",
-                content: TreeContent::Leaf(Leaf {
-                    update: dummy_update,
-                    view: dummy_view,
-                }),
-            },
-            TreeNode {
-                //reset command: rescan temp sensors, reset display at least, but keeps program, config
-                text: b"Reset",
-                content: TreeContent::Leaf(Leaf {
-                    update: dummy_update,
-                    view: dummy_view,
-                }),
-            },
-        ],
-    };
-
     let mut model = Model::new();
 
     let mut dp = stm32f103xx::Peripherals::take().unwrap();
@@ -748,7 +1276,7 @@ fn main() -> ! {
 
     let mut last_time = tick.now();
 
-    let mut hstdout = hio::hstdout().unwrap();
+    //let mut hstdout = hio::hstdout().unwrap();
 
     loop {
         watchdog.feed();
@@ -827,7 +1355,7 @@ fn main() -> ! {
                     _ => IR_Commands::Unknown,
                 };
                 //write!(hstdout, "{:x}={:?} ", data, command).unwrap();
-                model.ir_remote_command(command, &menu);
+                model.ir_remote_command(command, &MENU);
                 model.refresh_display(&mut display, &mut backlight);
             }
             _ => {}
@@ -866,6 +1394,8 @@ fn main() -> ! {
             instant: rtc.get_cnt(),
             unit: PhantomData::<Seconds>,
         });
+
+        model.update_programmed_target();
 
         // drive outputs, send messages:
 

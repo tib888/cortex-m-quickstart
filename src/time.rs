@@ -106,6 +106,15 @@ impl From<u32> for Duration<Ticks> {
     }
 }
 
+impl Time<Seconds> {
+    pub fn dhms(days: u32, hours: u32, minutes: u32, seconds: u32) -> Time<Seconds> {
+        Time::<Seconds> {
+            instant: days * 24 * 3600 + hours * 3600 + minutes * 60 + seconds,
+            unit: PhantomData::<Seconds>,
+        }
+    }
+}
+
 impl Duration<Seconds> {
     pub fn hms(hours: u32, minutes: u32, seconds: u32) -> Duration<Seconds> {
         Duration::<Seconds> {
