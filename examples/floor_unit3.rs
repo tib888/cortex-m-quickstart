@@ -457,8 +457,9 @@ const DAYS_PER_WEEK: u8 = 7;
 enum ProgramModes {
     Normal,               //everythig works as programmed
     Economy(Temperature), //target temp = Normal + the given offset (which is negative)
-    Party(u8),            //temp override is kept until midnight of the stored week day
-    Away((u32, u8)),      //freeze protection will work for N days, until M hour)
+    Party(u8),            //temp override is kept until midnight of the starting (stored) week day
+    Fix(Temperature),     //target temp = the given temperature
+    Away((u32, u8)),      //freeze protection will work for N days, until HH:00)
 }
 
 struct ProgramEntry {
@@ -776,6 +777,11 @@ impl<'a, 'b> Model<'a, 'b> {
     }
 
     fn update_programmed_target(&mut self) {
+        if let ProgramModes::Fix(temp) = self.mode {
+            self.floor_heating_config.target_air_temperature = Some(temp);
+            return;
+        }
+
         if let ProgramModes::Party(weekday) = self.mode {
             //if we are in party mode,
             if self.weektime.weekday != weekday {
@@ -822,7 +828,7 @@ impl<'a, 'b> Model<'a, 'b> {
         //     }
         // }
 
-        //the user override lives until program change:
+        //the user override live until program change:
         if self.current_program_index != idx {
             self.current_program_index = idx;
 
@@ -922,6 +928,18 @@ impl<'a, 'b> Model<'a, 'b> {
                     self.current_program_index += 1; //just  for triggering a refresh
                 }
                 IR_Commands::Blue => {
+                    self.mode = ProgramModes::Fix(if let ProgramModes::Fix(target) = self.mode {
+                        target
+                    } else {
+                        if let Some(current_temp) = self.floor_heating_config.target_air_temperature
+                        {
+                            current_temp
+                        } else {
+                            Temperature::from_celsius(12, 0)
+                        }
+                    });
+                    self.current_program_index += 1; //just  for triggering a refresh
+
                     // self.mode = if let ProgramModes::Away((days, hour)) = self.mode {
                     //     ProgramModes::Away((days, (hour + 1) % 24))
                     // } else {
@@ -936,6 +954,9 @@ impl<'a, 'b> Model<'a, 'b> {
                     ProgramModes::Economy(offset) => {
                         self.mode = ProgramModes::Economy(offset + Temperature::from_celsius(0, 1))
                     }
+                    ProgramModes::Fix(target) => {
+                        self.mode = ProgramModes::Fix(target + Temperature::from_celsius(0, 1))
+                    }
                     _ => {}
                 },
                 IR_Commands::Down => match self.mode {
@@ -944,6 +965,9 @@ impl<'a, 'b> Model<'a, 'b> {
                     }
                     ProgramModes::Economy(offset) => {
                         self.mode = ProgramModes::Economy(offset - Temperature::from_celsius(0, 1))
+                    }
+                    ProgramModes::Fix(target) => {
+                        self.mode = ProgramModes::Fix(target - Temperature::from_celsius(0, 1))
                     }
                     _ => {}
                 },
@@ -1023,6 +1047,10 @@ impl<'a, 'b> Model<'a, 'b> {
                 }
                 ProgramModes::Party(_day) => {
                     display.print(b"Party");
+                }
+                ProgramModes::Fix(temp) => {
+                    display.print(b"Fix ");
+                    display.print(fmt_temp(temp));
                 }
                 ProgramModes::Away((days, hour)) => {
                     display.print(b"Tavol ");

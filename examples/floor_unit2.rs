@@ -32,8 +32,6 @@ extern crate cortex_m;
 #[macro_use]
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
-#[macro_use]
-extern crate stm32f103xx as device;
 extern crate embedded_hal;
 extern crate ir;
 extern crate lcd_hal;
@@ -41,6 +39,7 @@ extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
 extern crate room_pill;
+extern crate stm32f103xx as device;
 extern crate stm32f103xx_hal as hal;
 
 //use sh::hio;
@@ -66,7 +65,7 @@ use rt::ExceptionFrame;
 
 entry!(main);
 
-fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<Temperature>) {
+fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &[u8], temp: &Option<Temperature>) {
     display.set_position(0, row);
     display.print(prefix);
 
@@ -74,7 +73,7 @@ fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<
         let t = temp.whole_degrees();
         display.print_char(if t < 0 { '-' } else { ' ' } as u8);
 
-        let t: u8 = t.abs() as u8;
+        let t: u8 = t as u8; //t does not contains the sign
         print_nn(display, t);
         display.print_char('.' as u8);
 
@@ -100,7 +99,7 @@ fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<
         display.print_char(ROUND_TABLE1[temp.fraction_degrees() as usize]);
         display.print_char(ROUND_TABLE2[temp.fraction_degrees() as usize]);
     } else {
-        display.print(" -----");
+        display.print(b" -----");
     }
 }
 
@@ -125,14 +124,14 @@ fn print_time<T: Display>(display: &mut T, t: u32) {
     print_nn(display, min as u8);
     display.print_char(' ' as u8);
 
-    static WEEKDAYS: [&str; 7] = [
-        "Hetfo    ",
-        "Kedd     ",
-        "Szerda   ",
-        "Csutortok",
-        "Pentek   ",
-        "Szombat  ",
-        "Vasarnap ",
+    static WEEKDAYS: [&[u8]; 7] = [
+        b"Hetfo    ",
+        b"Kedd     ",
+        b"Szerda   ",
+        b"Csutortok",
+        b"Pentek   ",
+        b"Szombat  ",
+        b"Vasarnap ",
     ];
     display.print(WEEKDAYS[weekday as usize]);
 
@@ -427,7 +426,7 @@ fn main() -> ! {
                 print_temp(
                     &mut display,
                     3,
-                    "Cel:   >",
+                    b"Cel:   >",
                     &floor_heating_config.target_air_temperature,
                 );
             }
@@ -488,7 +487,7 @@ fn main() -> ! {
         //     Payload::new(floor_heating_config.target_air_temperature),
         // ));
 
-        let status_text = match floor_heating_state {
+        let status_text: &[u8] = match floor_heating_state {
             floor_heating::State::Heating(defreeze) => {
                 valve.open();
                 pump.start();
@@ -496,10 +495,10 @@ fn main() -> ! {
                 //CAN: heat request
                 if defreeze {
                     rgb.color(Colors::Purple);
-                    "Olvasztas"
+                    b"Olvasztas"
                 } else {
                     rgb.color(Colors::Red);
-                    "Futes"
+                    b"Futes"
                 }
             }
             floor_heating::State::AfterCirculation(_) => {
@@ -508,7 +507,7 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Yellow);
-                "Utokeringetes"
+                b"Utokeringetes"
             }
             floor_heating::State::Standby(_) => {
                 valve.close();
@@ -516,7 +515,7 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Green);
-                "Keszenlet"
+                b"Keszenlet"
             }
             floor_heating::State::FreezeProtectionCheckCirculation(_) => {
                 valve.close();
@@ -524,12 +523,12 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Blue);
-                "Fagyvizsgalat"
+                b"Fagyvizsgalat"
             }
             floor_heating::State::Error => {
                 //CAN: sensor missing error
                 rgb.color(Colors::Cyan);
-                "Szenzorhiba"
+                b"Szenzorhiba"
             }
         };
 
@@ -544,11 +543,11 @@ fn main() -> ! {
         print_temp(
             &mut display,
             3,
-            "Cel:    ",
+            b"Cel:    ",
             &floor_heating_config.target_air_temperature,
         );
 
-        static LABELS: [&str; MAX_COUNT] = ["Elore:  ", "Vissza: ", "Padlo:  ", "Levego: "];
+        static LABELS: [&[u8]; MAX_COUNT] = [b"Elore:  ", b"Vissza: ", b"Padlo:  ", b"Levego: "];
 
         for i in 0..4 as u8 {
             print_temp(

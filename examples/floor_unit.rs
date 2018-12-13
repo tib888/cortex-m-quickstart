@@ -33,9 +33,8 @@ extern crate cortex_m;
 #[macro_use]
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
-#[macro_use]
-extern crate stm32f103xx as device;
 extern crate embedded_hal;
+extern crate stm32f103xx as device;
 //extern crate heapless;
 extern crate ir;
 extern crate lcd_hal;
@@ -74,15 +73,15 @@ entry!(main);
 
 //static mut RTC_DEVICE: Option<rtc::Rtc> = None;
 
-fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<Temperature>) {
+fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &[u8], temp: &Option<Temperature>) {
     display.set_position(0, row);
     display.print(prefix);
 
     if let Some(temp) = temp {
         let t = temp.whole_degrees();
-        display.print_char(if t < 0 { '-' } else { ' ' } as u8);
+        display.print_char(if temp.is_negative() { '-' } else { ' ' } as u8);
 
-        let t: u8 = t.abs() as u8;
+        let t: u8 = t as u8;
         if t > 9 {
             display.print_char('0' as u8 + (t / 10));
         }
@@ -109,7 +108,7 @@ fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &str, temp: &Option<
         static ROUND_TABLE: &[u8] = b"0112334456678899";
         display.print_char(ROUND_TABLE[temp.fraction_degrees() as usize]);
     } else {
-        display.print("-----");
+        display.print(b"-----");
     }
 }
 
@@ -411,7 +410,7 @@ fn main() -> ! {
                 print_temp(
                     &mut display,
                     5,
-                    "Cel:   >",
+                    b"Cel:   >",
                     &floor_heating_config.target_air_temperature,
                 );
             }
@@ -472,7 +471,7 @@ fn main() -> ! {
         //     Payload::new(floor_heating_config.target_air_temperature),
         // ));
 
-        let status_text = match floor_heating_state {
+        let status_text: &[u8] = match floor_heating_state {
             floor_heating::State::Heating(defreeze) => {
                 valve.open();
                 pump.start();
@@ -480,10 +479,10 @@ fn main() -> ! {
                 //CAN: heat request
                 if defreeze {
                     rgb.color(Colors::Purple);
-                    "Olvasztas"
+                    b"Olvasztas"
                 } else {
                     rgb.color(Colors::Red);
-                    "Futes"
+                    b"Futes"
                 }
             }
             floor_heating::State::AfterCirculation(_) => {
@@ -492,7 +491,7 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Yellow);
-                "Utokeringetes"
+                b"Utokeringetes"
             }
             floor_heating::State::Standby(_) => {
                 valve.close();
@@ -500,7 +499,7 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Green);
-                "Keszenlet"
+                b"Keszenlet"
             }
             floor_heating::State::FreezeProtectionCheckCirculation(_) => {
                 valve.close();
@@ -508,19 +507,19 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Blue);
-                "Fagyvizsgalat"
+                b"Fagyvizsgalat"
             }
             floor_heating::State::Error => {
                 //CAN: sensor missing error
                 rgb.color(Colors::Cyan);
-                "Szenzorhiba"
+                b"Szenzorhiba"
             }
         };
 
         //note: display.print(...) should not be called many times because seems to generate code size bloat and we will not fit in the flash
         display.clear();
 
-        static LABELS: [&str; MAX_COUNT] = ["Elore:  ", "Vissza: ", "Padlo:  ", "Levego: "];
+        static LABELS: [&[u8]; MAX_COUNT] = [b"Elore:  ", b"Vissza: ", b"Padlo:  ", b"Levego: "];
 
         for i in 0..4 as u8 {
             print_temp(
@@ -537,7 +536,7 @@ fn main() -> ! {
         print_temp(
             &mut display,
             5,
-            "Cel:    ",
+            b"Cel:    ",
             &floor_heating_config.target_air_temperature,
         );
     }

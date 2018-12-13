@@ -74,7 +74,8 @@ fn main() -> ! {
 
     let mut flash = dp.FLASH.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
-    let tick = MonoTimer::new(cp.DWT, clocks);
+    let trace_enabled = enable_trace(cp.DCB);
+    let tick = MonoTimer::new(cp.DWT, trace_enabled, clocks);
 
     let mut receiver = ir::IrReceiver::<Time>::new(); // period = 0.5ms = 500us
 
