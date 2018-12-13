@@ -34,25 +34,25 @@ extern crate cortex_m;
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
-extern crate stm32f103xx as device;
-//extern crate heapless;
 extern crate ir;
 extern crate lcd_hal;
 extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
 extern crate room_pill;
+extern crate stm32f103xx as device;
 extern crate stm32f103xx_hal as hal;
 //extern crate stm32f103xx_rtc as rtc;
+//extern crate heapless;
 
-//use core::fmt::Write;
+use crate::hal::delay::Delay;
+use crate::hal::prelude::*;
+use crate::hal::spi::Spi;
+use crate::hal::stm32f103xx;
+use crate::hal::watchdog::IndependentWatchdog;
+use crate::rt::ExceptionFrame;
 use embedded_hal::spi;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
-use hal::delay::Delay;
-use hal::prelude::*;
-use hal::spi::Spi;
-use hal::stm32f103xx;
-use hal::watchdog::IndependentWatchdog;
 use ir::NecReceiver;
 use lcd_hal::pcd8544::Pcd8544;
 use lcd_hal::{pcd8544, Display};
@@ -64,10 +64,10 @@ use room_pill::pump::*;
 use room_pill::rgb::*;
 use room_pill::time::*;
 use room_pill::valve::*;
-use rt::ExceptionFrame;
 //use sh::hio;
+//use core::fmt::Write;
 
-use hal::can::*;
+use crate::hal::can::*;
 
 entry!(main);
 
@@ -262,8 +262,8 @@ fn main() -> ! {
 
     let can_reconfigure_id: Id = Id::new_standard(13);
     let can_ask_status_id: Id = Id::new_standard(14);
-    let can_heat_request_id: Id = Id::new_standard(15);
-    let can_temperature_report_id: Id = Id::new_standard(16);
+    let _can_heat_request_id: Id = Id::new_standard(15);
+    let _can_temperature_report_id: Id = Id::new_standard(16);
 
     let filterbank0_config = FilterBankConfiguration {
         mode: FilterMode::List,
@@ -278,8 +278,8 @@ fn main() -> ! {
 
     let (tx, rx) = can.split();
 
-    let (mut tx0, mut tx1, mut tx2) = tx.split();
-    let (mut rx0, mut rx1) = rx.split();
+    let (_tx0, _tx1, _tx2) = tx.split();
+    let (mut rx0, _rx1) = rx.split();
 
     watchdog.feed();
 
@@ -349,7 +349,7 @@ fn main() -> ! {
         watchdog.feed();
 
         //receive and process can messages
-        if let Ok((filter_match_index, time, frame)) = rx0.read() {
+        if let Ok((filter_match_index, _time, frame)) = rx0.read() {
             // writeln!(
             //     hstdout,
             //     "rx0: {} {} {} {} {}",

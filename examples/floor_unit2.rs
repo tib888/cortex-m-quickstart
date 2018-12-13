@@ -42,14 +42,14 @@ extern crate room_pill;
 extern crate stm32f103xx as device;
 extern crate stm32f103xx_hal as hal;
 
-//use sh::hio;
+use crate::hal::can::*;
+use crate::hal::delay::Delay;
+use crate::hal::prelude::*;
+use crate::hal::rtc;
+use crate::hal::stm32f103xx;
+use crate::hal::watchdog::IndependentWatchdog;
+use crate::rt::ExceptionFrame;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
-use hal::can::*;
-use hal::delay::Delay;
-use hal::prelude::*;
-use hal::rtc;
-use hal::stm32f103xx;
-use hal::watchdog::IndependentWatchdog;
 use ir::NecReceiver;
 use lcd_hal::hx1230::Hx1230;
 use lcd_hal::{hx1230, Display};
@@ -61,7 +61,7 @@ use room_pill::pump::*;
 use room_pill::rgb::*;
 use room_pill::time::*;
 use room_pill::valve::*;
-use rt::ExceptionFrame;
+//use sh::hio;
 
 entry!(main);
 
@@ -71,7 +71,7 @@ fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &[u8], temp: &Option
 
     if let Some(temp) = temp {
         let t = temp.whole_degrees();
-        display.print_char(if t < 0 { '-' } else { ' ' } as u8);
+        display.print_char(if temp.is_negative() { '-' } else { ' ' } as u8);
 
         let t: u8 = t as u8; //t does not contains the sign
         print_nn(display, t);
@@ -262,8 +262,8 @@ fn main() -> ! {
 
     let can_reconfigure_id: Id = Id::new_standard(13);
     let can_ask_status_id: Id = Id::new_standard(14);
-    let can_heat_request_id: Id = Id::new_standard(15);
-    let can_temperature_report_id: Id = Id::new_standard(16);
+    let _can_heat_request_id: Id = Id::new_standard(15);
+    let _can_temperature_report_id: Id = Id::new_standard(16);
 
     let filterbank0_config = FilterBankConfiguration {
         mode: FilterMode::List,
@@ -278,8 +278,8 @@ fn main() -> ! {
 
     let (tx, rx) = can.split();
 
-    let (mut tx0, mut tx1, mut tx2) = tx.split();
-    let (mut rx0, mut rx1) = rx.split();
+    let (_tx0, _tx1, _tx2) = tx.split();
+    let (mut rx0, _rx1) = rx.split();
 
     watchdog.feed();
 
@@ -349,7 +349,7 @@ fn main() -> ! {
         watchdog.feed();
 
         //receive and process can messages
-        if let Ok((filter_match_index, time, frame)) = rx0.read() {
+        if let Ok((filter_match_index, _time, frame)) = rx0.read() {
             // writeln!(
             //     hstdout,
             //     "rx0: {} {} {} {} {}",

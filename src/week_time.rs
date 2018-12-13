@@ -1,5 +1,5 @@
 use core::marker::PhantomData;
-use time::{Seconds, Time};
+use crate::time::{Seconds, Time};
 
 #[derive(Clone, Copy, Default)]
 pub struct WeekTime {

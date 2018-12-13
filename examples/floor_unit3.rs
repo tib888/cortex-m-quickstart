@@ -42,15 +42,15 @@ extern crate room_pill;
 extern crate stm32f103xx as device;
 extern crate stm32f103xx_hal as hal;
 
-//use core::fmt::Write;
 use core::marker::PhantomData;
+use crate::hal::can::*;
+use crate::hal::delay::Delay;
+use crate::hal::prelude::*;
+use crate::hal::rtc;
+use crate::hal::stm32f103xx;
+use crate::hal::watchdog::IndependentWatchdog;
+use crate::rt::ExceptionFrame;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
-use hal::can::*;
-use hal::delay::Delay;
-use hal::prelude::*;
-use hal::rtc;
-use hal::stm32f103xx;
-use hal::watchdog::IndependentWatchdog;
 use ir::NecReceiver;
 use lcd_hal::{hx1230, hx1230::Hx1230};
 use onewire::ds18x20::*;
@@ -62,8 +62,8 @@ use room_pill::rgb::*;
 use room_pill::time::{Duration, Seconds, Ticker, Ticks, Time};
 use room_pill::valve::*;
 use room_pill::week_time::*;
-use rt::ExceptionFrame;
-//use sh::hio; //
+//use sh::hio;
+//use core::fmt::Write;
 
 #[derive(Debug, PartialEq)]
 enum IR_Commands {

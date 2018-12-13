@@ -16,11 +16,11 @@ extern crate panic_semihosting;
 extern crate stm32f103xx_hal as hal;
 
 use core::fmt::Write;
-use hal::delay::Delay;
-use hal::prelude::*;
-use hal::stm32f103xx;
-use rt::ExceptionFrame;
-use sh::hio;
+use crate::hal::delay::Delay;
+use crate::hal::prelude::*;
+use crate::hal::stm32f103xx;
+use crate::rt::ExceptionFrame;
+use crate::sh::hio;
 
 use onewire::ds18x20::*;
 use onewire::*;

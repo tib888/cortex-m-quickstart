@@ -18,12 +18,12 @@ extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
-use hal::prelude::*;
-use hal::stm32f103xx;
-use hal::time::*;
+use crate::hal::prelude::*;
+use crate::hal::stm32f103xx;
+use crate::hal::time::*;
+use crate::rt::ExceptionFrame;
 use ir::NecReceiver;
 use room_pill::rgb::*;
-use rt::ExceptionFrame;
 
 #[derive(Copy, Clone)]
 struct Time {
