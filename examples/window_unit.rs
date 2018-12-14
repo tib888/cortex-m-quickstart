@@ -17,6 +17,7 @@ extern crate stm32f103xx_hal as hal;
 
 use crate::hal::prelude::*;
 use crate::hal::stm32f103xx;
+use crate::rt::entry;
 use crate::rt::ExceptionFrame;
 use ir::NecReceiver;
 use room_pill::rgb::{Colors, RgbLed};
@@ -24,8 +25,7 @@ use room_pill::time::{Ticker, Ticks, Time};
 //use sh::hio;
 //use core::fmt::Write;
 
-entry!(main);
-
+#[entry]
 fn main() -> ! {
 	window_unit_main();
 }
@@ -159,14 +159,12 @@ fn window_unit_main() -> ! {
 // 	r.EXTI.pr.write(|w| w.pr15().set_bit());
 // }
 
-exception!(HardFault, hard_fault);
-
-fn hard_fault(ef: &ExceptionFrame) -> ! {
+#[exception]
+fn HardFault(ef: &ExceptionFrame) -> ! {
 	panic!("HardFault at {:#?}", ef);
 }
 
-exception!(*, default_handler);
-
-fn default_handler(irqn: i16) {
+#[exception]
+fn DefaultHandler(irqn: i16) {
 	panic!("Unhandled exception (IRQn = {})", irqn);
 }

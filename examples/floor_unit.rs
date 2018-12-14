@@ -8,11 +8,10 @@
 //! Solid state relay 1 connected to B6 drives the valve
 //! Solid state relay 2 connected to B7 drives the pump
 //!
-//! pcd8544 lcd display conected to SPI1 and some gpio port:
+//! Hx1230 lcd display conected to SPI1 and some gpio port:
 //!   PA5 = Display SPI clock
 //!   PA6 = Display SPI input - not used
 //!   PA7 = Display SPI data
-//!   PA3 = Display Data/Command^
 //!   PA2 = Display Chip Select^ - if SPI is not shared this could be constantly pulled to GND
 //!   PA1 = Display Reset^ - this could be connected to the 5v with a resistor and to the Gnd with a capacitor
 //!   B12 = Display Backlight^ (with a PNP transistor) - use open drain output!
@@ -40,80 +39,957 @@ extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
 extern crate room_pill;
-extern crate stm32f103xx as device;
+//extern crate stm32f103xx as device;
 extern crate stm32f103xx_hal as hal;
-//extern crate stm32f103xx_rtc as rtc;
-//extern crate heapless;
 
+use crate::hal::can::*;
 use crate::hal::delay::Delay;
 use crate::hal::prelude::*;
-use crate::hal::spi::Spi;
+use crate::hal::rtc;
 use crate::hal::stm32f103xx;
 use crate::hal::watchdog::IndependentWatchdog;
 use crate::rt::ExceptionFrame;
-use embedded_hal::spi;
+use core::marker::PhantomData;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use ir::NecReceiver;
-use lcd_hal::pcd8544::Pcd8544;
-use lcd_hal::{pcd8544, Display};
+use lcd_hal::{hx1230, hx1230::Hx1230};
 use onewire::ds18x20::*;
 use onewire::temperature::Temperature;
 use onewire::*;
+use room_pill::display::*;
 use room_pill::floor_heating;
+use room_pill::ir_remote::*;
+use room_pill::menu::*;
 use room_pill::pump::*;
 use room_pill::rgb::*;
-use room_pill::time::*;
+use room_pill::time::{Duration, Seconds, Ticker, Ticks, Time};
 use room_pill::valve::*;
+use room_pill::week_time::*;
+use rt::entry;
 //use sh::hio;
 //use core::fmt::Write;
 
-use crate::hal::can::*;
+static MENU: Menu<Model, IrCommands> = Menu {
+    rows: &[
+        Row {
+            text: b"Set Clock",
+            content: Content::SubMenu(Menu {
+                rows: &[
+                    Row {
+                        text: b"Nap",
+                        content: Content::MenuItem(Item {
+                            update: set_time_weekday,
+                            view: view_time_weekday,
+                        }),
+                    },
+                    Row {
+                        text: b"Ora",
+                        content: Content::MenuItem(Item {
+                            update: set_time_hour,
+                            view: view_time_hour,
+                        }),
+                    },
+                    Row {
+                        text: b"Perc",
+                        content: Content::MenuItem(Item {
+                            update: set_time_min,
+                            view: view_time_min,
+                        }),
+                    },
+                ],
+            }),
+        },
+        Row {
+            text: b"Program",
+            content: Content::SubMenu(Menu {
+                rows: &[
+                    Row {
+                        text: b"Nap",
+                        content: Content::MenuItem(Item {
+                            update: set_program_day_index,
+                            view: view_program_day_index,
+                        }),
+                    },
+                    Row {
+                        text: b"Program",
+                        content: Content::MenuItem(Item {
+                            update: set_program_index,
+                            view: view_program_index,
+                        }),
+                    },
+                    Row {
+                        text: b"Start ora",
+                        content: Content::MenuItem(Item {
+                            update: set_program_start_hour,
+                            view: view_program_start_hour,
+                        }),
+                    },
+                    Row {
+                        text: b"Start perc",
+                        content: Content::MenuItem(Item {
+                            update: set_program_start_min,
+                            view: view_program_start_min,
+                        }),
+                    },
+                    Row {
+                        text: b"Hofok",
+                        content: Content::MenuItem(Item {
+                            update: set_program_target_temp,
+                            view: view_program_target_temp,
+                        }),
+                    },
+                ],
+            }),
+        },
+        // Row {
+        //     text: b"Config",
+        //     content: Content::MenuItem(Item {
+        //         update: dummy_update,
+        //         view: dummy_view,
+        //     }),
+        // },
 
-entry!(main);
+        // Row {
+        //     text: b"Reset", //TODO reset command: rescan temp sensors, reset display at least, but keeps program, config
+        //     content: Content::MenuItem(Item {
+        //         update: dummy_update,
+        //         view: dummy_view,
+        //     }),
+        // },
+    ],
+};
 
-//static mut RTC_DEVICE: Option<rtc::Rtc> = None;
-
-fn print_temp<T: Display>(display: &mut T, row: u8, prefix: &[u8], temp: &Option<Temperature>) {
-    display.set_position(0, row);
-    display.print(prefix);
-
-    if let Some(temp) = temp {
-        let t = temp.whole_degrees();
-        display.print_char(if temp.is_negative() { '-' } else { ' ' } as u8);
-
-        let t: u8 = t as u8;
-        if t > 9 {
-            display.print_char('0' as u8 + (t / 10));
+fn set_time_weekday(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.weektime = WeekTime {
+                weekday: (model.weektime.weekday + 1) % DAYS_PER_WEEK,
+                ..model.weektime
+            };
+            model.update_time_offset();
         }
-        display.print_char('0' as u8 + (t % 10));
-        display.print_char('.' as u8);
+        IrCommands::Left => {
+            model.weektime = WeekTime {
+                weekday: (model.weektime.weekday - 1) % DAYS_PER_WEEK,
+                ..model.weektime
+            };
+            model.update_time_offset();
+        }
+        _ => {}
+    };
+}
 
-        //round fraction to one digit:
-        // 0	0.000
-        // 1	0.063
-        // 2	0.125
-        // 3	0.188
-        // 4	0.250
-        // 5	0.313
-        // 6	0.375
-        // 7	0.438
-        // 8	0.500
-        // 9	0.563
-        // 10	0.625
-        // 11	0.688
-        // 12	0.750
-        // 13	0.813
-        // 14	0.875
-        // 15	0.938
-        static ROUND_TABLE: &[u8] = b"0112334456678899";
-        display.print_char(ROUND_TABLE[temp.fraction_degrees() as usize]);
-    } else {
-        display.print(b"-----");
+fn set_program_day_index(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.programmed_index =
+                (model.programmed_index + PROGRAMS_PER_DAY) % (DAYS_PER_WEEK * PROGRAMS_PER_DAY);
+        }
+        IrCommands::Left => {
+            model.programmed_index =
+                (model.programmed_index - PROGRAMS_PER_DAY) % (DAYS_PER_WEEK * PROGRAMS_PER_DAY);
+        }
+        _ => {}
+    };
+}
+fn set_program_index(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.programmed_index =
+                if model.programmed_index % PROGRAMS_PER_DAY == PROGRAMS_PER_DAY - 1 {
+                    model.programmed_index - (PROGRAMS_PER_DAY - 1)
+                } else {
+                    model.programmed_index + 1
+                }
+        }
+        IrCommands::Left => {
+            model.programmed_index = if model.programmed_index % PROGRAMS_PER_DAY == 0 {
+                model.programmed_index + (PROGRAMS_PER_DAY - 1)
+            } else {
+                model.programmed_index - 1
+            }
+        }
+        _ => {}
+    };
+}
+
+fn set_program_start_hour(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                hour: (wt.hour + 1) % 24,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        IrCommands::Left => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                hour: (wt.hour - 1) % 24,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        _ => {
+            return;
+        }
+    }
+}
+fn set_program_start_min(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                min: (wt.min + 10) % 60,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        IrCommands::Left => {
+            let wt = WeekTime::from(model.program[model.programmed_index as usize].start_time);
+            let wt = WeekTime {
+                min: (wt.min - 10) % 60,
+                ..wt
+            };
+            model.program[model.programmed_index as usize].start_time = Time::<Seconds>::from(wt);
+        }
+        _ => {
+            return;
+        }
+    }
+}
+fn set_program_target_temp(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.program[model.programmed_index as usize].target_air_temperature =
+                model.program[model.programmed_index as usize].target_air_temperature
+                    + Temperature::from_celsius(0, 2);
+        }
+        IrCommands::Left => {
+            model.program[model.programmed_index as usize].target_air_temperature =
+                model.program[model.programmed_index as usize].target_air_temperature
+                    - Temperature::from_celsius(0, 2);
+        }
+        _ => {
+            return;
+        }
     }
 }
 
+fn view_program_day_index(model: &Model) -> &'static [u8] {
+    WEEKDAYS[(model.programmed_index / PROGRAMS_PER_DAY) as usize]
+}
+fn view_program_index(model: &Model) -> &'static [u8] {
+    fmt_nn(((model.programmed_index % PROGRAMS_PER_DAY) + 1) as u8)
+}
+fn view_program_start_hour(model: &Model) -> &'static [u8] {
+    fmt_nn(WeekTime::from(model.program[model.programmed_index as usize].start_time).hour)
+}
+fn view_program_start_min(model: &Model) -> &'static [u8] {
+    fmt_nn(WeekTime::from(model.program[model.programmed_index as usize].start_time).min)
+}
+fn view_program_target_temp(model: &Model) -> &'static [u8] {
+    fmt_temp(model.program[model.programmed_index as usize].target_air_temperature)
+}
+
+fn view_time_weekday(model: &Model) -> &'static [u8] {
+    WEEKDAYS[model.weektime.weekday as usize]
+}
+fn view_time_hour(model: &Model) -> &'static [u8] {
+    fmt_nn(model.weektime.hour)
+}
+fn view_time_min(model: &Model) -> &'static [u8] {
+    fmt_nn(model.weektime.min)
+}
+
+fn set_time_hour(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.weektime = WeekTime {
+                hour: (model.weektime.hour + 1) % 24,
+                ..model.weektime
+            }
+        }
+        IrCommands::Left => {
+            model.weektime = WeekTime {
+                hour: (model.weektime.hour - 1) % 24,
+                ..model.weektime
+            }
+        }
+        _ => {
+            return;
+        }
+    }
+    model.update_time_offset();
+}
+
+fn set_time_min(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.weektime = WeekTime {
+                min: (model.weektime.min + 1) % 60,
+                sec: 0,
+                ..model.weektime
+            }
+        }
+        IrCommands::Left => {
+            model.weektime = WeekTime {
+                min: (model.weektime.min - 1) % 60,
+                sec: 0,
+                ..model.weektime
+            }
+        }
+        _ => {
+            return;
+        }
+    }
+    model.update_time_offset();
+}
+
+const MAX_COUNT: usize = 4; //max numbert of thermometers
+const PROGRAMS_PER_DAY: u8 = 6;
+const DAYS_PER_WEEK: u8 = 7;
+
+enum ProgramModes {
+    Normal,               //everythig works as programmed
+    Economy(Temperature), //target temp = Normal + the given offset (which is negative)
+    Party(u8),            //temp override is kept until midnight of the starting (stored) week day
+    Fix(Temperature),     //target temp = the given temperature
+    Away((u32, u8)),      //freeze protection will work for N days, until HH:00)
+}
+
+struct ProgramEntry {
+    start_time: Time<Seconds>,
+    target_air_temperature: Temperature,
+}
+
+struct Model<'a, 'b> {
+    //config:
+    can_config: Configuration,
+    floor_heating_config: floor_heating::Config<Temperature, Duration<Seconds>>,
+    backlight_timeout: Duration<Seconds>, //time in seconds before backlight tuns off
+    time_offset: u32,                     //used for rtc to weektime calibration
+    program: [ProgramEntry; (DAYS_PER_WEEK * PROGRAMS_PER_DAY) as usize],
+
+    //state:
+    mode: ProgramModes,
+
+    floor_heating_state: floor_heating::State<Duration<Seconds>>,
+    temperatures: [Option<Temperature>; MAX_COUNT],
+    time: Time<Seconds>, //rtc based, ever increasing, in seconds
+    weektime: WeekTime,  //redundant WeekTime::from(self.time + self.time_offset)
+    current_program_index: usize,
+
+    //UI state:
+    active_menu: Option<&'b Menu<'a, Model<'a, 'b>, IrCommands>>,
+    selected_row: usize,
+    programmed_index: u8,
+}
+
+impl<'a, 'b> Model<'a, 'b> {
+    fn new() -> Self {
+        Self {
+            can_config: Configuration {
+                time_triggered_communication_mode: false,
+                automatic_bus_off_management: true,
+                automatic_wake_up_mode: true,
+                no_automatic_retransmission: false,
+                receive_fifo_locked_mode: false,
+                transmit_fifo_priority: false,
+                silent_mode: false,
+                loopback_mode: false,
+                synchronisation_jump_width: 1,
+                bit_segment_1: 3,
+                bit_segment_2: 2,
+                time_quantum_length: 6,
+            },
+
+            //this config will be updated by IR remote or CAN messages
+            mode: ProgramModes::Economy(Temperature::from_celsius(-4, 0)),
+
+            floor_heating_config: floor_heating::Config {
+                max_forward_temperature: Temperature::from_celsius(40, 0),
+                max_floor_temperature: Temperature::from_celsius(29, 0),
+                target_air_temperature: Some(Temperature::from_celsius(16, 0)),
+                temperature_histeresis: Temperature::from_celsius(0, 2),
+                freeze_protection: floor_heating::FreezeProtectionConfig {
+                    min_temperature: Temperature::from_celsius(5, 0),
+                    safe_temperature: Temperature::from_celsius(8, 0),
+                    check_interval: Duration::<Seconds>::hms(4, 0, 0), //4 hour
+                    check_duration: Duration::<Seconds>::hms(0, 4, 0), //4 min
+                },
+                after_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
+            },
+
+            backlight_timeout: Duration::<Seconds>::hms(0, 1, 0),
+
+            time_offset: 0u32,
+
+            program: [
+                //monday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(0, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //tuesday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(1, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //wednesday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(2, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //thursday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(3, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //friday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 6, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 12, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(18, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 21, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //saturday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 11, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 21, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+                //sunday:
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 15, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 11, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    target_air_temperature: Temperature::from_celsius(19, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    target_air_temperature: Temperature::from_celsius(20, 0),
+                },
+                ProgramEntry {
+                    start_time: Time::<Seconds>::dhms(4, 20, 0, 0),
+                    target_air_temperature: Temperature::from_celsius(17, 0),
+                },
+            ],
+
+            floor_heating_state: floor_heating::State::Standby(Duration::sec(0)),
+            temperatures: [None; MAX_COUNT],
+            time: Time::<Seconds> {
+                instant: 0,
+                unit: PhantomData::<Seconds>,
+            },
+            weektime: WeekTime::default(),
+            current_program_index: 0,
+
+            active_menu: None,
+            selected_row: 0,
+            programmed_index: 0,
+        }
+    }
+
+    ///set weektime from self.time.instant + self.time_offset
+    fn update_weektime(&mut self) {
+        self.weektime = WeekTime::from(Time::<Seconds>::from(
+            self.time.instant.wrapping_add(self.time_offset),
+        ));
+    }
+
+    ///set timeoffset from self.weektime - self.time.instant
+    fn update_time_offset(&mut self) {
+        self.time_offset = Time::<Seconds>::from(self.weektime)
+            .instant
+            .wrapping_sub(self.time.instant);
+    }
+
+    //update by real time clock
+    fn update_time(&mut self, time: Time<Seconds>) {
+        if self.time != time {
+            let delta_time = time - self.time;
+            self.time = time;
+
+            self.floor_heating_state = self.floor_heating_state.update(
+                &self.floor_heating_config,
+                self.temperatures[0],
+                self.temperatures[1],
+                self.temperatures[2],
+                self.temperatures[3],
+                delta_time,
+            );
+
+            if self.backlight_timeout > Duration::<Seconds>::default() {
+                if self.backlight_timeout < delta_time {
+                    self.backlight_timeout = Duration::<Seconds>::default();
+                } else {
+                    self.backlight_timeout = self.backlight_timeout - delta_time;
+                }
+            }
+
+            self.update_weektime();
+        }
+    }
+
+    fn search_current_program_index(&self) -> usize {
+        let mut idx = self.program.len() - 1;
+        let now = Time::<Seconds>::from(self.weektime);
+        for i in 0..self.program.len() {
+            if self.program[i].start_time.instant < now.instant {
+                idx = i;
+            } else {
+                break;
+            };
+        }
+        idx
+    }
+
+    fn update_programmed_target(&mut self) {
+        if let ProgramModes::Fix(temp) = self.mode {
+            self.floor_heating_config.target_air_temperature = Some(temp);
+            return;
+        }
+
+        if let ProgramModes::Party(weekday) = self.mode {
+            //if we are in party mode,
+            if self.weektime.weekday != weekday {
+                //if midnight passed, return to normal mode
+                self.mode = ProgramModes::Normal;
+            } else {
+                //stay in party mode -> the user temperature override remains active
+                return;
+            }
+        }
+
+        let idx = self.search_current_program_index();
+
+        // //midnight passed:
+        // if WeekTime::from(self.program[self.current_program_index].start_time).weekday
+        //     != self.weektime.weekday
+        // {
+        //     match self.mode {
+        //         ProgramModes::Away((days, hour)) => {
+        //             self.current_program_index = idx;
+        //             self.mode = ProgramModes::Away((days - 1, hour)); //decrease the remaining time
+        //             self.floor_heating_config.target_air_temperature = if days > 0 {
+        //                 //keep defreeze state
+        //                 None
+        //             } else {
+        //                 //on the last day keep normal - 4 degree
+        //                 Some(
+        //                     self.program[idx].target_air_temperature
+        //                         - Temperature::from_celsius(4, 0),
+        //                 )
+        //             };
+        //             return;
+        //         }
+        //         _ => {}
+        //     }
+        // } else {
+        //     if let ProgramModes::Away((days, hour)) = self.mode {
+        //         if days < 1 && self.weektime.hour >= hour {
+        //             //in away mode on thelast day, at the given hour return to normal mode
+        //             self.mode = ProgramModes::Normal;
+        //         } else {
+        //             return;
+        //         }
+        //     }
+        // }
+
+        //the user override live until program change:
+        if self.current_program_index != idx {
+            self.current_program_index = idx;
+
+            let offset = if let ProgramModes::Economy(offset) = self.mode {
+                offset
+            } else {
+                Temperature::from_celsius(0, 0)
+            };
+
+            self.floor_heating_config.target_air_temperature =
+                Some(self.program[idx].target_air_temperature + offset);
+        }
+    }
+
+    //update by IR remote
+    fn ir_remote_command(
+        &mut self,
+        command: IrCommands,
+        root_menu: &'a Menu<'a, Model<'a, '_>, IrCommands>,
+    ) {
+        self.backlight_timeout = Duration::hms(0, 0, 20);
+
+        if let Some(active_menu) = self.active_menu {
+            let n = active_menu.rows.len();
+            match command {
+                IrCommands::Home => self.active_menu = None,
+                IrCommands::Up => {
+                    if self.selected_row > 0 {
+                        self.selected_row -= 1;
+                    } else if n > 0 {
+                        self.selected_row = n - 1;
+                    }
+                }
+                IrCommands::Down => {
+                    if self.selected_row + 1 < n {
+                        self.selected_row += 1;
+                    } else {
+                        self.selected_row = 0;
+                    }
+                }
+                IrCommands::Ok => {
+                    if let Content::SubMenu(ref subtree) =
+                        active_menu.rows[self.selected_row].content
+                    {
+                        self.active_menu = Some(&subtree);
+                        self.selected_row = 0;
+                    }
+                }
+                _ => {
+                    if let Content::MenuItem(ref item) = active_menu.rows[self.selected_row].content
+                    {
+                        (item.update)(self, command);
+                    }
+                }
+            }
+        } else {
+            match command {
+                IrCommands::Menu => {
+                    self.active_menu = Some(root_menu);
+                    self.selected_row = 0;
+                }
+                IrCommands::Right => {
+                    self.floor_heating_config.target_air_temperature = if let Some(target_temp) =
+                        self.floor_heating_config.target_air_temperature
+                    {
+                        Some(target_temp + Temperature::from_celsius(0, 1))
+                    } else {
+                        Some(Temperature::from_celsius(20, 0))
+                    };
+                }
+                IrCommands::Left => {
+                    self.floor_heating_config.target_air_temperature = if let Some(target_temp) =
+                        self.floor_heating_config.target_air_temperature
+                    {
+                        Some(target_temp - Temperature::from_celsius(0, 1))
+                    } else {
+                        Some(Temperature::from_celsius(20, 0))
+                    };
+                }
+                IrCommands::Backspace => {
+                    self.floor_heating_config.target_air_temperature = None;
+                }
+                IrCommands::Red => {
+                    self.mode = ProgramModes::Party(self.weektime.weekday);
+                    self.current_program_index += 1; //just  for triggering a refresh
+                }
+                IrCommands::Green => {
+                    self.mode =
+                        ProgramModes::Economy(if let ProgramModes::Economy(offset) = self.mode {
+                            offset
+                        } else {
+                            Temperature::from_celsius(-2, 0)
+                        });
+                    self.current_program_index += 1; //just  for triggering a refresh
+                }
+                IrCommands::Yellow => {
+                    self.mode = ProgramModes::Normal;
+                    self.current_program_index += 1; //just  for triggering a refresh
+                }
+                IrCommands::Blue => {
+                    self.mode = ProgramModes::Fix(if let ProgramModes::Fix(target) = self.mode {
+                        target
+                    } else {
+                        if let Some(current_temp) = self.floor_heating_config.target_air_temperature
+                        {
+                            current_temp
+                        } else {
+                            Temperature::from_celsius(12, 0)
+                        }
+                    });
+                    self.current_program_index += 1; //just  for triggering a refresh
+
+                    // self.mode = if let ProgramModes::Away((days, hour)) = self.mode {
+                    //     ProgramModes::Away((days, (hour + 1) % 24))
+                    // } else {
+                    //     ProgramModes::Away((1, self.weektime.hour.into()))
+                    // };
+                    // self.model.current_program_index += 1;//just  for triggering a refresh
+                }
+                IrCommands::Up => match self.mode {
+                    ProgramModes::Away((days, hour)) => {
+                        self.mode = ProgramModes::Away((days + 1, hour))
+                    }
+                    ProgramModes::Economy(offset) => {
+                        self.mode = ProgramModes::Economy(offset + Temperature::from_celsius(0, 1))
+                    }
+                    ProgramModes::Fix(target) => {
+                        self.mode = ProgramModes::Fix(target + Temperature::from_celsius(0, 1))
+                    }
+                    _ => {}
+                },
+                IrCommands::Down => match self.mode {
+                    ProgramModes::Away((days, hour)) => {
+                        self.mode = ProgramModes::Away((if days > 0 { days - 1 } else { 0 }, hour))
+                    }
+                    ProgramModes::Economy(offset) => {
+                        self.mode = ProgramModes::Economy(offset - Temperature::from_celsius(0, 1))
+                    }
+                    ProgramModes::Fix(target) => {
+                        self.mode = ProgramModes::Fix(target - Temperature::from_celsius(0, 1))
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    }
+
+    //update by temp sensors
+    fn update_temperature(&mut self, index: usize, temperature: Option<Temperature>) {
+        self.temperatures[index] = temperature;
+    }
+
+    fn refresh_display<D: lcd_hal::Display, B: embedded_hal::digital::OutputPin>(
+        &self,
+        display: &mut D,
+        backlight: &mut B,
+    ) {
+        if self.backlight_timeout == Duration::default() {
+            backlight.set_high(); //turn off
+        } else {
+            backlight.set_low(); //turn on
+        }
+
+        if let Some(active_menu) = self.active_menu {
+            //TODO render menu
+            display.clear();
+            // TODO let (cols, rows) = display.get_char_resolution();
+            let rows = 8;
+            let start_index = if self.selected_row >= rows {
+                self.selected_row - rows + 1
+            } else {
+                0
+            };
+
+            let (cols, _) = display.get_char_resolution();
+            let (colsx, _) = display.get_pixel_resolution();
+            let colc = colsx / cols;
+
+            for row in 0..rows {
+                let index = row + start_index;
+                if index >= active_menu.rows.len() {
+                    break;
+                }
+
+                display.set_position(0, row as u8);
+
+                display.print_char(if self.selected_row == index {
+                    '>' as u8
+                } else {
+                    ' ' as u8
+                });
+                display.print(active_menu.rows[index].text);
+
+                if let Content::MenuItem(ref item) = active_menu.rows[index].content {
+                    display.print_char(':' as u8);
+                    let content = (item.view)(self);
+                    display.set_position(colsx - colc * content.len() as u8, row as u8);
+                    display.print(content);
+                }
+            }
+        } else {
+            //display status
+            display.clear();
+
+            display.set_position(0, 0);
+            print_time(display, self.weektime);
+
+            display.set_position(0, 1);
+            match self.mode {
+                ProgramModes::Normal => {
+                    display.print(b"Normal");
+                }
+                ProgramModes::Economy(offset) => {
+                    display.print(b"Eco ");
+                    display.print(fmt_temp(offset));
+                }
+                ProgramModes::Party(_day) => {
+                    display.print(b"Party");
+                }
+                ProgramModes::Fix(temp) => {
+                    display.print(b"Fix ");
+                    display.print(fmt_temp(temp));
+                }
+                ProgramModes::Away((days, hour)) => {
+                    display.print(b"Tavol ");
+                    print_nnn(display, days);
+                    display.print(b"d ");
+                    print_nn(display, hour);
+                    display.print(b":00");
+                }
+            };
+
+            print_temp(
+                display,
+                3,
+                b"Cel:    ",
+                &self.floor_heating_config.target_air_temperature,
+            );
+
+            static LABELS: [&[u8]; MAX_COUNT] =
+                [b"Elore:  ", b"Vissza: ", b"Padlo:  ", b"Levego: "];
+
+            for i in 0..4 as u8 {
+                print_temp(
+                    display,
+                    4 + i,
+                    LABELS[i as usize],
+                    &self.temperatures[i as usize],
+                );
+            }
+
+            //display.set_position(90, 7);
+            //display.print(b" TTTTTTTTTTTTTTTT");
+        }
+    }
+}
+
+#[entry]
 fn main() -> ! {
-    let dp = stm32f103xx::Peripherals::take().unwrap();
+    let mut model = Model::new();
+
+    let mut dp = stm32f103xx::Peripherals::take().unwrap();
+
     let mut watchdog = IndependentWatchdog::new(dp.IWDG);
     watchdog.start(2_000_000u32.us());
 
@@ -127,29 +1003,7 @@ fn main() -> ! {
     let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
 
     // real time clock
-    // let mut rtc = rtc::Rtc::new(dp.RTC, &mut rcc.apb1, &mut dp.PWR);
-
-    // if rtc.get_cnt() < 100 {
-    //     let today = rtc::datetime::DateTime {
-    //         year: 2018,
-    //         month: 11,
-    //         day: 21,
-    //         hour: 16,
-    //         min: 45,
-    //         sec: 0,
-    //         day_of_week: rtc::datetime::DayOfWeek::Wednesday,
-    //     };
-    //     if let Some(epoch) = today.to_epoch() {
-    //         rtc.set_cnt(epoch);
-    //     }
-    // }
-    // unsafe {
-    //     RTC_DEVICE = Some(rtc);
-    //     RTC_DEVICE
-    //         .as_mut()
-    //         .unwrap()
-    //         .enable_second_interrupt(&mut cp.NVIC);
-    // }
+    let rtc = rtc::Rtc::new(dp.RTC, &mut rcc.apb1, &mut dp.PWR);
 
     // IR receiver^
     let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
@@ -178,36 +1032,25 @@ fn main() -> ! {
 
     watchdog.feed();
 
-    // setup SPI for the PCD8544 display:
-    let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl); //PA5 = Display SPI clock
-    let miso = gpioa.pa6.into_floating_input(&mut gpioa.crl); //PA6 = Display SPI input - not used
-    let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl); //PA7 = Display SPI data
-    let spi_mode = spi::Mode {
-        phase: spi::Phase::CaptureOnFirstTransition,
-        polarity: spi::Polarity::IdleLow,
-    };
+    // setup SPI for the lcd display:
+    let sck = gpioa.pa5.into_push_pull_output(&mut gpioa.crl); //PA5 = Display SPI clock
+    let mosi = gpioa.pa7.into_push_pull_output(&mut gpioa.crl); //PA7 = Display SPI data
 
-    let spi = Spi::spi1(
-        dp.SPI1,
-        (sck, miso, mosi),
-        &mut afio.mapr,
-        spi_mode,
-        4.mhz(),
-        clocks,
-        &mut rcc.apb2,
-    );
-
-    // other pins for PCD8544
+    // other pins for lcd
     let mut backlight = gpiob.pb12.into_open_drain_output(&mut gpiob.crh); //PB12 Display backlight^
     backlight.set_low();
 
-    let dc = gpioa.pa3.into_push_pull_output(&mut gpioa.crl); // PA4 = Display Data/Command^
     let cs = gpioa.pa2.into_push_pull_output(&mut gpioa.crl); // PA3 = Display ChipSelect^
     let mut rst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl); // PA1 = Display Reset^
 
     let mut delay = Delay::new(cp.SYST, clocks);
-    let mut display = pcd8544::spi::Pcd8544Spi::new(spi, dc, cs, &mut rst, &mut delay);
+    let mut display = hx1230::gpio::Hx1230Gpio::new(sck, mosi, cs, &mut rst, &mut delay);
     display.init();
+    display.set_contrast(7);
+
+    //rotate the screen with 180 degree:
+    //display.flip_horizontal(true);
+    //display.flip_vertical(true);
 
     watchdog.feed();
 
@@ -224,21 +1067,6 @@ fn main() -> ! {
     let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 
     let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
-
-    let can_config = Configuration {
-        time_triggered_communication_mode: false,
-        automatic_bus_off_management: true,
-        automatic_wake_up_mode: true,
-        no_automatic_retransmission: false,
-        receive_fifo_locked_mode: false,
-        transmit_fifo_priority: false,
-        silent_mode: false,
-        loopback_mode: false,
-        synchronisation_jump_width: 1,
-        bit_segment_1: 3,
-        bit_segment_2: 2,
-        time_quantum_length: 6,
-    };
 
     let canrx = gpioa.pa11.into_floating_input(&mut gpioa.crh);
     let cantx = gpioa.pa12.into_alternate_push_pull(&mut gpioa.crh);
@@ -257,9 +1085,13 @@ fn main() -> ! {
         dp.USB,
     );
 
-    can.configure(&can_config);
+    watchdog.feed();
+    can.configure(&model.can_config);
+
+    watchdog.feed();
     nb::block!(can.to_normal()).unwrap(); //just to be sure
 
+    watchdog.feed();
     let can_reconfigure_id: Id = Id::new_standard(13);
     let can_ask_status_id: Id = Id::new_standard(14);
     let _can_heat_request_id: Id = Id::new_standard(15);
@@ -278,30 +1110,10 @@ fn main() -> ! {
 
     let (tx, rx) = can.split();
 
-    let (_tx0, _tx1, _tx2) = tx.split();
-    let (mut rx0, _rx1) = rx.split();
+    let (mut _tx0, mut _tx1, mut _tx2) = tx.split();
+    let (mut rx0, mut _rx1) = rx.split();
 
     watchdog.feed();
-
-    let mut floor_heating_state = floor_heating::State::Standby(Duration::sec(0));
-
-    //this config will be updated by IR remote or CAN messages
-    let mut floor_heating_config = floor_heating::Config {
-        max_forward_temperature: Temperature::from_celsius(40, 0),
-        max_floor_temperature: Temperature::from_celsius(29, 0),
-        target_air_temperature: None, //Some(Temperature::from_celsius(19, 0)),
-        temperature_histeresis: Temperature::from_celsius(0, 1),
-        freeze_protection: floor_heating::FreezeProtectionConfig {
-            min_temperature: Temperature::from_celsius(5, 0),
-            safe_temperature: Temperature::from_celsius(8, 0),
-            check_interval: Duration::<Seconds>::hms(4, 0, 0), //4 hour
-            check_duration: Duration::<Seconds>::hms(0, 4, 0), //4 min
-        },
-        after_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
-    };
-
-    const MAX_COUNT: usize = 4;
-    let mut temp_sensors: [Option<Temperature>; MAX_COUNT] = [None; 4];
 
     //store the addresses of temp sensors, start measurement on each:
     let mut roms = [[0u8; 8]; MAX_COUNT];
@@ -343,7 +1155,7 @@ fn main() -> ! {
 
     let mut last_time = tick.now();
 
-    let mut backlight_timeout = 5u32;
+    //let mut hstdout = hio::hstdout().unwrap();
 
     loop {
         watchdog.feed();
@@ -377,42 +1189,10 @@ fn main() -> ! {
         match ir_cmd {
             Ok(ir::NecContent::Repeat) => {}
             Ok(ir::NecContent::Data(data)) => {
-                backlight.set_low(); //turn on
-                backlight_timeout = 20;
-
-                //TODO Add a reset command! (rescan temp sensors, reset display at least)
-
-                floor_heating_config.target_air_temperature = match data >> 8 {
-                    0x807F80 => Some(Temperature::from_celsius(20, 0)), //0
-                    0x807F72 => Some(Temperature::from_celsius(21, 0)), //1
-                    0x807FB0 => Some(Temperature::from_celsius(22, 0)), //2
-                    0x807F30 => Some(Temperature::from_celsius(23, 0)), //3
-                    0x807F52 => Some(Temperature::from_celsius(24, 0)), //4
-                    0x807F90 => Some(Temperature::from_celsius(15, 0)), //5
-                    0x807F10 => Some(Temperature::from_celsius(16, 0)), //6
-                    0x807F62 => Some(Temperature::from_celsius(17, 0)), //7
-                    0x807FA0 => Some(Temperature::from_celsius(18, 0)), //8
-                    0x807F20 => Some(Temperature::from_celsius(19, 0)), //9
-                    0x20F002 | 0x807F68 => floor_heating_config
-                        .target_air_temperature
-                        .map(|t| t + Temperature::from_celsius(0, 4)), //up +4/16 C
-                    0x20F082 | 0x807F58 => floor_heating_config
-                        .target_air_temperature
-                        .map(|t| t - Temperature::from_celsius(0, 4)), //down -4/16 C
-                    0x20F04E | 0x807FC2 => Some(Temperature::from_celsius(22, 0)), //red
-                    0x20F08E | 0x807FF0 => Some(Temperature::from_celsius(20, 0)), //green
-                    0x20F0C6 | 0x807F08 => Some(Temperature::from_celsius(18, 0)), //yellow
-                    0x20F086 | 0x807F18 => Some(Temperature::from_celsius(15, 0)), //blue
-                    0x20F022 | 0x807FC8 => None,                        //OK
-                    _ => floor_heating_config.target_air_temperature,   //etc.
-                };
-                rgb.color(Colors::Black);
-                print_temp(
-                    &mut display,
-                    5,
-                    b"Cel:   >",
-                    &floor_heating_config.target_air_temperature,
-                );
+                let command = translate(data);
+                //write!(hstdout, "{:x}={:?} ", data, command).unwrap();
+                model.ir_remote_command(command, &MENU);
+                model.refresh_display(&mut display, &mut backlight);
             }
             _ => {}
         }
@@ -427,13 +1207,6 @@ fn main() -> ! {
 
         led.toggle();
 
-        if backlight_timeout > 0 {
-            backlight_timeout -= 1;
-            if backlight_timeout == 0 {
-                backlight.set_high(); //turn off
-            }
-        }
-
         // decrease the time resolution
         let delta_time = Duration::sec(delta.count / tick.frequency);
 
@@ -442,23 +1215,26 @@ fn main() -> ! {
 
         //read sensors and restart temperature measurement
         for i in 0..count {
-            temp_sensors[i] = match one_wire.read_temperature_measurement_result(&roms[i]) {
-                Ok(temperature) => Some(temperature),
-                Err(_code) => None,
-            };
+            model.update_temperature(
+                i,
+                match one_wire.read_temperature_measurement_result(&roms[i]) {
+                    Ok(temperature) => Some(temperature),
+                    Err(_code) => None,
+                },
+            );
             let _ = one_wire.start_temperature_measurement(&roms[i]);
         }
 
-        floor_heating_state = floor_heating_state.update(
-            &floor_heating_config,
-            temp_sensors[0],
-            temp_sensors[1],
-            temp_sensors[2],
-            temp_sensors[3],
-            delta_time,
-        );
+        // and an independent real time clock with 1 sec resolution:
+        model.update_time(Time::<Seconds> {
+            instant: rtc.get_cnt(),
+            unit: PhantomData::<Seconds>,
+        });
+
+        model.update_programmed_target();
 
         // drive outputs, send messages:
+
         // let txresult0 = tx0.request_transmit(&Frame::new(
         //     can_temperature_report_id,
         //     Payload::new(temp_sensors[0]),
@@ -471,7 +1247,7 @@ fn main() -> ! {
         //     Payload::new(floor_heating_config.target_air_temperature),
         // ));
 
-        let status_text: &[u8] = match floor_heating_state {
+        let _status_text = match model.floor_heating_state {
             floor_heating::State::Heating(defreeze) => {
                 valve.open();
                 pump.start();
@@ -479,10 +1255,10 @@ fn main() -> ! {
                 //CAN: heat request
                 if defreeze {
                     rgb.color(Colors::Purple);
-                    b"Olvasztas"
+                    "Olvasztas"
                 } else {
                     rgb.color(Colors::Red);
-                    b"Futes"
+                    "Futes"
                 }
             }
             floor_heating::State::AfterCirculation(_) => {
@@ -491,7 +1267,7 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Yellow);
-                b"Utokeringetes"
+                "Utokeringetes"
             }
             floor_heating::State::Standby(_) => {
                 valve.close();
@@ -499,7 +1275,7 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Green);
-                b"Keszenlet"
+                "Keszenlet"
             }
             floor_heating::State::FreezeProtectionCheckCirculation(_) => {
                 valve.close();
@@ -507,61 +1283,34 @@ fn main() -> ! {
                 heat_request.set_low();
                 //CAN: no heat request
                 rgb.color(Colors::Blue);
-                b"Fagyvizsgalat"
+                "Fagyvizsgalat"
             }
             floor_heating::State::Error => {
                 //CAN: sensor missing error
                 rgb.color(Colors::Cyan);
-                b"Szenzorhiba"
+                "Szenzorhiba"
             }
         };
 
-        //note: display.print(...) should not be called many times because seems to generate code size bloat and we will not fit in the flash
-        display.clear();
+        model.refresh_display(&mut display, &mut backlight);
 
-        static LABELS: [&[u8]; MAX_COUNT] = [b"Elore:  ", b"Vissza: ", b"Padlo:  ", b"Levego: "];
-
-        for i in 0..4 as u8 {
-            print_temp(
-                &mut display,
-                i,
-                LABELS[i as usize],
-                &temp_sensors[i as usize],
-            );
+        if backlight.is_high() {
+            //exit from menu when backlight timed out
+            model.active_menu = None;
         }
 
-        display.set_position(0, 4);
-        display.print(status_text);
-
-        print_temp(
-            &mut display,
-            5,
-            b"Cel:    ",
-            &floor_heating_config.target_air_temperature,
-        );
+        //display.set_position(0, 2);
+        //display.print(_status_text);
     }
 }
 
-exception!(HardFault, hard_fault);
-
-fn hard_fault(_ef: &ExceptionFrame) -> ! {
+#[exception]
+fn HardFault(_ef: &ExceptionFrame) -> ! {
     loop {}
     //panic!("HardFault at {:#?}", ef); //removed due to large code size
 }
 
-exception!(*, default_handler);
-
-fn default_handler(_irqn: i16) {
+#[exception]
+fn DefaultHandler(_irqn: i16) {
     //panic!("Unhandled exception (IRQn = {})", irqn);  //removed due to large code size
 }
-
-// interrupt!(RTC, rtc);
-
-// fn rtc() {
-//     let mut hstdout = sh::hio::hstdout().unwrap();
-//     let rtc = unsafe { RTC_DEVICE.as_mut().unwrap() };
-//     let mut s = heapless::String::<heapless::consts::U32>::new();
-//     writeln!(s, "{}", rtc::datetime::DateTime::new(rtc.get_cnt())).unwrap();
-//     hstdout.write_str(&s).unwrap();
-//     rtc.clear_second_interrupt();
-// }

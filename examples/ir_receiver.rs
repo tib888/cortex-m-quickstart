@@ -18,13 +18,13 @@ extern crate stm32f103xx_hal as hal;
 use core::fmt::Write;
 use crate::hal::prelude::*;
 use crate::hal::stm32f103xx;
+use crate::rt::entry;
 use crate::rt::ExceptionFrame;
 use crate::sh::hio;
 use ir::NecReceiver;
 use room_pill::time::{Ticker, Ticks, Time};
 
-entry!(main);
-
+#[entry]
 fn main() -> ! {
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = stm32f103xx::Peripherals::take().unwrap();
@@ -69,14 +69,12 @@ fn print_ir_command(ir_cmd: &nb::Result<ir::NecContent, u32>) {
     }
 }
 
-exception!(HardFault, hard_fault);
-
-fn hard_fault(ef: &ExceptionFrame) -> ! {
+#[exception]
+fn HardFault(ef: &ExceptionFrame) -> ! {
     panic!("HardFault at {:#?}", ef);
 }
 
-exception!(*, default_handler);
-
-fn default_handler(irqn: i16) {
+#[exception]
+fn DefaultHandler(irqn: i16) {
     panic!("Unhandled exception (IRQn = {})", irqn);
 }
