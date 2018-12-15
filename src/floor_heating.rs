@@ -1,16 +1,15 @@
 use core::ops::Add;
 use core::ops::Sub;
 
-//#[derive(Debug)]
 pub enum State<Duration> {
-    Heating(bool),                              //bool=defrost
-    AfterCirculation(Duration),                 //circulation_since_closed duration
-    Standby(Duration),                          //since_last_freeze_test duration
+    PrepareHeating((bool, Duration)), //bool=defrost, duration required to fully open the valve before starting the heater
+    Heating(bool),                    //bool=defrost
+    AfterCirculation(Duration),       //circulation_since_closed duration
+    Standby(Duration),                //since_last_freeze_test duration
     FreezeProtectionCheckCirculation(Duration), //pre_circulation_duration
     Error,
 }
 
-#[derive(Clone, Copy)]
 pub struct FreezeProtectionConfig<Temperature, Duration> {
     pub min_temperature: Temperature,
     pub safe_temperature: Temperature,
@@ -24,6 +23,7 @@ pub struct Config<Temperature, Duration> {
     pub target_air_temperature: Option<Temperature>,
     pub temperature_histeresis: Temperature,
     pub freeze_protection: FreezeProtectionConfig<Temperature, Duration>,
+    pub pre_circulation_duration: Duration,
     pub after_circulation_duration: Duration,
 }
 
@@ -43,6 +43,14 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
         delta_time: Duration,
     ) -> State<Duration> {
         match self {
+            State::PrepareHeating((defreeze, circulation_since_opened)) => {
+                if *circulation_since_opened > config.pre_circulation_duration {
+                    State::Heating(*defreeze)
+                } else {
+                    State::PrepareHeating((*defreeze, *circulation_since_opened + delta_time))
+                }
+            }
+
             State::Heating(defreeze) => {
                 //too hot protection:
                 if let Some(ref forward_temp) = forward_temperature {
@@ -103,8 +111,8 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
             State::Standby(since_last_freeze_test) => {
                 if let Some(target) = config.target_air_temperature {
                     if let Some(temp) = air_temperature {
-                        if temp < target - config.temperature_histeresis {
-                            return State::Heating(false);
+                        if temp <= target - config.temperature_histeresis {
+                            return State::PrepareHeating((false, Duration::default()));
                         }
                     };
                 };
@@ -127,7 +135,7 @@ impl<Duration: Copy + PartialOrd + Default + Add<Duration, Output = Duration>> S
                 };
 
                 if return_temp < config.freeze_protection.min_temperature {
-                    State::Heating(true)
+                    State::PrepareHeating((true, Duration::default()))
                 } else {
                     if *circulation_duration > config.freeze_protection.check_duration {
                         State::Standby(Duration::default())

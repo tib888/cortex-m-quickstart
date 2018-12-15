@@ -39,7 +39,6 @@ extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
 extern crate room_pill;
-//extern crate stm32f103xx as device;
 extern crate stm32f103xx_hal as hal;
 
 use crate::hal::can::*;
@@ -72,7 +71,7 @@ use rt::entry;
 static MENU: Menu<Model, IrCommands> = Menu {
     rows: &[
         Row {
-            text: b"Set Clock",
+            text: b"Orabeallitas",
             content: Content::SubMenu(Menu {
                 rows: &[
                     Row {
@@ -100,7 +99,7 @@ static MENU: Menu<Model, IrCommands> = Menu {
             }),
         },
         Row {
-            text: b"Program",
+            text: b"Heti program",
             content: Content::SubMenu(Menu {
                 rows: &[
                     Row {
@@ -141,21 +140,62 @@ static MENU: Menu<Model, IrCommands> = Menu {
                 ],
             }),
         },
-        // Row {
-        //     text: b"Config",
-        //     content: Content::MenuItem(Item {
-        //         update: dummy_update,
-        //         view: dummy_view,
-        //     }),
-        // },
-
-        // Row {
-        //     text: b"Reset", //TODO reset command: rescan temp sensors, reset display at least, but keeps program, config
-        //     content: Content::MenuItem(Item {
-        //         update: dummy_update,
-        //         view: dummy_view,
-        //     }),
-        // },
+        Row {
+            text: b"Beallitasok",
+            content: Content::SubMenu(Menu {
+                rows: &[
+                    Row {
+                        text: b"Fagyveszely",
+                        content: Content::MenuItem(Item {
+                            update: set_freeze_warning,
+                            view: view_freeze_warning,
+                        }),
+                    },
+                    Row {
+                        text: b"Fagystop",
+                        content: Content::MenuItem(Item {
+                            update: set_freeze_stop,
+                            view: view_freeze_stop,
+                        }),
+                    },
+                    Row {
+                        text: b"Elore Max",
+                        content: Content::MenuItem(Item {
+                            update: set_forward_max,
+                            view: view_forward_max,
+                        }),
+                    },
+                    Row {
+                        text: b"Padlo Max",
+                        content: Content::MenuItem(Item {
+                            update: set_floor_max,
+                            view: view_floor_max,
+                        }),
+                    },
+                    Row {
+                        text: b"Hiszterezis",
+                        content: Content::MenuItem(Item {
+                            update: set_histeresis,
+                            view: view_histeresis,
+                        }),
+                    },
+                    Row {
+                        text: b"Utokeringetes",
+                        content: Content::MenuItem(Item {
+                            update: set_after_circulation,
+                            view: view_after_circulation,
+                        }),
+                    },
+                    Row {
+                        text: b"Elokeringetes",
+                        content: Content::MenuItem(Item {
+                            update: set_pre_circulation,
+                            view: view_pre_circulation,
+                        }),
+                    },
+                ],
+            }),
+        },
     ],
 };
 
@@ -278,7 +318,7 @@ fn set_program_target_temp(model: &mut Model, command: IrCommands) {
 }
 
 fn view_program_day_index(model: &Model) -> &'static [u8] {
-    WEEKDAYS[(model.programmed_index / PROGRAMS_PER_DAY) as usize]
+    fmt_weekday(model.programmed_index / PROGRAMS_PER_DAY)
 }
 fn view_program_index(model: &Model) -> &'static [u8] {
     fmt_nn(((model.programmed_index % PROGRAMS_PER_DAY) + 1) as u8)
@@ -294,7 +334,7 @@ fn view_program_target_temp(model: &Model) -> &'static [u8] {
 }
 
 fn view_time_weekday(model: &Model) -> &'static [u8] {
-    WEEKDAYS[model.weektime.weekday as usize]
+    fmt_weekday(model.weektime.weekday)
 }
 fn view_time_hour(model: &Model) -> &'static [u8] {
     fmt_nn(model.weektime.hour)
@@ -323,7 +363,6 @@ fn set_time_hour(model: &mut Model, command: IrCommands) {
     }
     model.update_time_offset();
 }
-
 fn set_time_min(model: &mut Model, command: IrCommands) {
     match command {
         IrCommands::Right => {
@@ -347,7 +386,152 @@ fn set_time_min(model: &mut Model, command: IrCommands) {
     model.update_time_offset();
 }
 
-const MAX_COUNT: usize = 4; //max numbert of thermometers
+fn set_after_circulation(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.floor_heating_config.after_circulation_duration =
+                model.floor_heating_config.after_circulation_duration + Duration::hms(0, 0, 15);
+        }
+        IrCommands::Left => {
+            if model.floor_heating_config.after_circulation_duration > Duration::hms(0, 0, 15) {
+                model.floor_heating_config.after_circulation_duration =
+                    model.floor_heating_config.after_circulation_duration - Duration::hms(0, 0, 15);
+            }
+        }
+        _ => {}
+    }
+}
+fn set_pre_circulation(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.floor_heating_config.pre_circulation_duration =
+                model.floor_heating_config.pre_circulation_duration + Duration::hms(0, 0, 15);
+        }
+        IrCommands::Left => {
+            if model.floor_heating_config.pre_circulation_duration > Duration::hms(0, 0, 15) {
+                model.floor_heating_config.pre_circulation_duration =
+                    model.floor_heating_config.pre_circulation_duration - Duration::hms(0, 0, 15);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn view_after_circulation(model: &Model) -> &'static [u8] {
+    fmt_duration(model.floor_heating_config.after_circulation_duration)
+}
+fn view_pre_circulation(model: &Model) -> &'static [u8] {
+    fmt_duration(model.floor_heating_config.pre_circulation_duration)
+}
+
+fn set_freeze_warning(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model
+                .floor_heating_config
+                .freeze_protection
+                .safe_temperature = model
+                .floor_heating_config
+                .freeze_protection
+                .safe_temperature
+                + Temperature::from_celsius(0, 4);
+        }
+        IrCommands::Left => {
+            model
+                .floor_heating_config
+                .freeze_protection
+                .safe_temperature = model
+                .floor_heating_config
+                .freeze_protection
+                .safe_temperature
+                - Temperature::from_celsius(0, 4);
+        }
+        _ => {}
+    }
+}
+fn set_freeze_stop(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.floor_heating_config.freeze_protection.min_temperature =
+                model.floor_heating_config.freeze_protection.min_temperature
+                    + Temperature::from_celsius(0, 4);
+        }
+        IrCommands::Left => {
+            model.floor_heating_config.freeze_protection.min_temperature =
+                model.floor_heating_config.freeze_protection.min_temperature
+                    - Temperature::from_celsius(0, 4);
+        }
+        _ => {}
+    }
+}
+
+fn set_forward_max(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.floor_heating_config.max_forward_temperature =
+                model.floor_heating_config.max_forward_temperature
+                    + Temperature::from_celsius(0, 4);
+        }
+        IrCommands::Left => {
+            model.floor_heating_config.max_forward_temperature =
+                model.floor_heating_config.max_forward_temperature
+                    - Temperature::from_celsius(0, 4);
+        }
+        _ => {}
+    }
+}
+fn set_floor_max(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.floor_heating_config.max_floor_temperature =
+                model.floor_heating_config.max_floor_temperature + Temperature::from_celsius(0, 4);
+        }
+        IrCommands::Left => {
+            model.floor_heating_config.max_floor_temperature =
+                model.floor_heating_config.max_floor_temperature - Temperature::from_celsius(0, 4);
+        }
+        _ => {}
+    }
+}
+fn set_histeresis(model: &mut Model, command: IrCommands) {
+    match command {
+        IrCommands::Right => {
+            model.floor_heating_config.temperature_histeresis =
+                model.floor_heating_config.temperature_histeresis + Temperature::from_celsius(0, 1);
+        }
+        IrCommands::Left => {
+            if model.floor_heating_config.temperature_histeresis > Temperature::from_celsius(0, 1) {
+                model.floor_heating_config.temperature_histeresis =
+                    model.floor_heating_config.temperature_histeresis
+                        - Temperature::from_celsius(0, 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn view_freeze_warning(model: &Model) -> &'static [u8] {
+    fmt_temp(
+        model
+            .floor_heating_config
+            .freeze_protection
+            .safe_temperature,
+    )
+}
+fn view_freeze_stop(model: &Model) -> &'static [u8] {
+    fmt_temp(model.floor_heating_config.freeze_protection.min_temperature)
+}
+fn view_forward_max(model: &Model) -> &'static [u8] {
+    fmt_temp(model.floor_heating_config.max_forward_temperature)
+}
+fn view_floor_max(model: &Model) -> &'static [u8] {
+    fmt_temp(model.floor_heating_config.max_floor_temperature)
+}
+fn view_histeresis(model: &Model) -> &'static [u8] {
+    fmt_temp(model.floor_heating_config.temperature_histeresis)
+}
+
+const MAX_THERMOMETER_COUNT: usize = 4; //max number of thermometers
 const PROGRAMS_PER_DAY: u8 = 6;
 const DAYS_PER_WEEK: u8 = 7;
 
@@ -356,7 +540,7 @@ enum ProgramModes {
     Economy(Temperature), //target temp = Normal + the given offset (which is negative)
     Party(u8),            //temp override is kept until midnight of the starting (stored) week day
     Fix(Temperature),     //target temp = the given temperature
-    Away((u32, u8)),      //freeze protection will work for N days, until HH:00)
+                          //Away((u32, u8)),      //freeze protection will work for N days, until HH:00)
 }
 
 struct ProgramEntry {
@@ -376,7 +560,7 @@ struct Model<'a, 'b> {
     mode: ProgramModes,
 
     floor_heating_state: floor_heating::State<Duration<Seconds>>,
-    temperatures: [Option<Temperature>; MAX_COUNT],
+    temperatures: [Option<Temperature>; MAX_THERMOMETER_COUNT],
     time: Time<Seconds>, //rtc based, ever increasing, in seconds
     weektime: WeekTime,  //redundant WeekTime::from(self.time + self.time_offset)
     current_program_index: usize,
@@ -419,6 +603,7 @@ impl<'a, 'b> Model<'a, 'b> {
                     check_interval: Duration::<Seconds>::hms(4, 0, 0), //4 hour
                     check_duration: Duration::<Seconds>::hms(0, 4, 0), //4 min
                 },
+                pre_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
                 after_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
             },
 
@@ -605,7 +790,7 @@ impl<'a, 'b> Model<'a, 'b> {
             ],
 
             floor_heating_state: floor_heating::State::Standby(Duration::sec(0)),
-            temperatures: [None; MAX_COUNT],
+            temperatures: [None; MAX_THERMOMETER_COUNT],
             time: Time::<Seconds> {
                 instant: 0,
                 unit: PhantomData::<Seconds>,
@@ -846,9 +1031,9 @@ impl<'a, 'b> Model<'a, 'b> {
                     // self.model.current_program_index += 1;//just  for triggering a refresh
                 }
                 IrCommands::Up => match self.mode {
-                    ProgramModes::Away((days, hour)) => {
-                        self.mode = ProgramModes::Away((days + 1, hour))
-                    }
+                    // ProgramModes::Away((days, hour)) => {
+                    //     self.mode = ProgramModes::Away((days + 1, hour))
+                    // }
                     ProgramModes::Economy(offset) => {
                         self.mode = ProgramModes::Economy(offset + Temperature::from_celsius(0, 1))
                     }
@@ -858,9 +1043,9 @@ impl<'a, 'b> Model<'a, 'b> {
                     _ => {}
                 },
                 IrCommands::Down => match self.mode {
-                    ProgramModes::Away((days, hour)) => {
-                        self.mode = ProgramModes::Away((if days > 0 { days - 1 } else { 0 }, hour))
-                    }
+                    // ProgramModes::Away((days, hour)) => {
+                    //     self.mode = ProgramModes::Away((if days > 0 { days - 1 } else { 0 }, hour))
+                    // }
                     ProgramModes::Economy(offset) => {
                         self.mode = ProgramModes::Economy(offset - Temperature::from_celsius(0, 1))
                     }
@@ -949,14 +1134,13 @@ impl<'a, 'b> Model<'a, 'b> {
                 ProgramModes::Fix(temp) => {
                     display.print(b"Fix ");
                     display.print(fmt_temp(temp));
-                }
-                ProgramModes::Away((days, hour)) => {
-                    display.print(b"Tavol ");
-                    print_nnn(display, days);
-                    display.print(b"d ");
-                    print_nn(display, hour);
-                    display.print(b":00");
-                }
+                } // ProgramModes::Away((days, hour)) => {
+                  //     display.print(b"Tavol ");
+                  //     print_nnn(display, days);
+                  //     display.print(b"d ");
+                  //     print_nn(display, hour);
+                  //     display.print(b":00");
+                  // }
             };
 
             print_temp(
@@ -966,7 +1150,7 @@ impl<'a, 'b> Model<'a, 'b> {
                 &self.floor_heating_config.target_air_temperature,
             );
 
-            static LABELS: [&[u8]; MAX_COUNT] =
+            static LABELS: [&[u8]; MAX_THERMOMETER_COUNT] =
                 [b"Elore:  ", b"Vissza: ", b"Padlo:  ", b"Levego: "];
 
             for i in 0..4 as u8 {
@@ -1116,7 +1300,7 @@ fn main() -> ! {
     watchdog.feed();
 
     //store the addresses of temp sensors, start measurement on each:
-    let mut roms = [[0u8; 8]; MAX_COUNT];
+    let mut roms = [[0u8; 8]; MAX_THERMOMETER_COUNT];
     let mut count = 0;
 
     let mut it = RomIterator::new(0);
@@ -1135,7 +1319,7 @@ fn main() -> ! {
                     roms[count] = *rom;
                     count = count + 1;
                     let _ = one_wire.start_temperature_measurement(&rom);
-                    if count >= MAX_COUNT {
+                    if count >= MAX_THERMOMETER_COUNT {
                         break;
                     }
                 }
@@ -1248,11 +1432,24 @@ fn main() -> ! {
         // ));
 
         let _status_text = match model.floor_heating_state {
+            floor_heating::State::PrepareHeating((defreeze, _)) => {
+                valve.open();
+                pump.start();
+                heat_request.set_low();
+                //CAN: no heat request yet
+                if defreeze {
+                    rgb.color(Colors::Purple);
+                    "...Olvasztas"
+                } else {
+                    rgb.color(Colors::Red);
+                    "...Futes"
+                }
+            }
             floor_heating::State::Heating(defreeze) => {
                 valve.open();
                 pump.start();
                 heat_request.set_high();
-                //CAN: heat request
+                //CAN: heat request!
                 if defreeze {
                     rgb.color(Colors::Purple);
                     "Olvasztas"
@@ -1265,7 +1462,7 @@ fn main() -> ! {
                 valve.close();
                 pump.start();
                 heat_request.set_low();
-                //CAN: no heat request
+                //CAN: stop heat request
                 rgb.color(Colors::Yellow);
                 "Utokeringetes"
             }

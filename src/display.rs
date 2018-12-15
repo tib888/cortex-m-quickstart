@@ -1,12 +1,44 @@
+use crate::time::{Duration, Seconds};
 use crate::week_time::*;
 use onewire::temperature::Temperature;
 
+static WEEKDAYS: [&[u8]; 7] = [
+    b"Hetfo",
+    b"Kedd",
+    b"Szerda",
+    b"Csutortok",
+    b"Pentek",
+    b"Szombat",
+    b"Vasarnap",
+];
+
+pub fn fmt_weekday(n: u8) -> &'static [u8] {
+    //assert!(n < 7);
+    &(WEEKDAYS[n as usize])
+}
+
 pub fn fmt_nn(n: u8) -> &'static [u8] {
-    assert!(n < 100);
+    //assert!(n < 100);
     static mut TEXT: [u8; 2] = [0u8; 2];
     unsafe {
         TEXT[0] = '0' as u8 + (n / 10u8);
         TEXT[1] = '0' as u8 + (n % 10u8);
+        &TEXT
+    }
+}
+
+pub fn fmt_duration(duration: Duration<Seconds>) -> &'static [u8] {
+    let t = duration.count;
+    //assert!(t < 100 * 60);
+    let min = (t / 60) as u8;
+    let sec = (t % 60) as u8;
+    static mut TEXT: [u8; 5] = [0u8; 5];
+    unsafe {
+        TEXT[0] = '0' as u8 + (min / 10u8);
+        TEXT[1] = '0' as u8 + (min % 10u8);
+        TEXT[2] = ':' as u8;
+        TEXT[3] = '0' as u8 + (sec / 10u8);
+        TEXT[4] = '0' as u8 + (sec % 10u8);
         &TEXT
     }
 }
@@ -69,21 +101,11 @@ pub fn print_nn<D: lcd_hal::Display>(display: &mut D, n: u8) {
 }
 
 pub fn print_nnn<D: lcd_hal::Display>(display: &mut D, n: u32) {
-    assert!(n < 1000);
+    //assert!(n < 1000);
     let a = n / 100;
     display.print_char('0' as u8 + a as u8);
     print_nn(display, (n - (a * 100)) as u8);
 }
-
-pub static WEEKDAYS: [&[u8]; 7] = [
-    b"Hetfo",
-    b"Kedd",
-    b"Szerda",
-    b"Csutortok",
-    b"Pentek",
-    b"Szombat",
-    b"Vasarnap",
-];
 
 pub fn print_time<D: lcd_hal::Display>(display: &mut D, t: WeekTime) {
     display.print(WEEKDAYS[t.weekday as usize]);
