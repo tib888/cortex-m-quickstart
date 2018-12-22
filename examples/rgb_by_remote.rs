@@ -12,7 +12,6 @@ extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
 extern crate ir;
-extern crate nb;
 extern crate onewire;
 extern crate panic_semihosting;
 extern crate room_pill;

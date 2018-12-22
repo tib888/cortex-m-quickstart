@@ -7,6 +7,8 @@ extern crate embedded_hal;
 extern crate ir;
 extern crate stm32f103xx_hal;
 
+pub mod ac_switch;
+pub mod dac;
 pub mod display;
 pub mod floor_heating;
 pub mod ir_remote;

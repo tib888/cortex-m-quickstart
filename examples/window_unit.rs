@@ -48,8 +48,8 @@ fn window_unit_main() -> ! {
 		.modify(|_, w| unsafe { w.swj_cfg().bits(1) });
 
 	//Window unit pins:
-	let _valave_sense_a = gpioa.pa0.into_floating_input(&mut gpioa.crl);
-	let _valave_sense_b = gpioa.pa1.into_floating_input(&mut gpioa.crl);
+	let _valve_sense_a = gpioa.pa0.into_floating_input(&mut gpioa.crl);
+	let _valve_sense_b = gpioa.pa1.into_floating_input(&mut gpioa.crl);
 	let _roll_up_button = gpioa.pa2.into_pull_up_input(&mut gpioa.crl);
 	let _roll_down_button = gpioa.pa3.into_pull_up_input(&mut gpioa.crl);
 	let _motion_alarm = gpioa.pa4.into_pull_up_input(&mut gpioa.crl);
