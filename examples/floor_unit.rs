@@ -41,29 +41,26 @@ extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
-use crate::hal::can::*;
-use crate::hal::delay::Delay;
-use crate::hal::prelude::*;
-use crate::hal::rtc;
-use crate::hal::stm32f103xx;
-use crate::hal::watchdog::IndependentWatchdog;
+use crate::hal::{
+    can::*, delay::Delay, prelude::*, rtc, stm32f103xx, watchdog::IndependentWatchdog,
+};
 use crate::rt::ExceptionFrame;
 use core::marker::PhantomData;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use ir::NecReceiver;
 use lcd_hal::{hx1230, hx1230::Hx1230};
-use onewire::ds18x20::*;
-use onewire::temperature::Temperature;
-use onewire::*;
-use room_pill::display::*;
-use room_pill::floor_heating;
-use room_pill::ir_remote::*;
-use room_pill::menu::*;
-use room_pill::pump::*;
-use room_pill::rgb::*;
-use room_pill::time::{Duration, Seconds, Ticker, Ticks, Time};
-use room_pill::valve::*;
-use room_pill::week_time::*;
+use onewire::{ds18x20::*, temperature::Temperature, *};
+use room_pill::{
+    display::*,
+    floor_heating,
+    ir_remote::*,
+    menu::*,
+    pump::*,
+    rgb::*,
+    time::{Duration, Seconds, Ticker, Ticks, Time},
+    valve::*,
+    week_time::*,
+};
 use rt::entry;
 //use sh::hio;
 //use core::fmt::Write;

@@ -1,4 +1,7 @@
-//! Switces on A0, A1, A2, A3 (pull down once in each main period if closed)
+//! Switch d on A0 (pull down once in each main period if closed)
+//! Switch c on A1 (pull down once in each main period if closed)
+//! Switch a on A2 (pull down once in each main period if closed)
+//! Switch b on A3 (pull down once in each main period if closed)
 //!
 //! Motion alarm on A4 (pull down)
 //! Open alarm on A5 (pull down)
@@ -7,8 +10,8 @@
 //!
 //! Optional piezzo speaker on A8
 //!
-//! Solid state relay connected to A9 drives the lamp_a
-//! Solid state relay connected to A10 drives the lamp_b
+//! Solid state relay connected to A9 drives the ssr_lamp_a
+//! Solid state relay connected to A10 drives the ssr_lamp_b
 //!
 //! CAN (RX, TX) on A11, A12
 //!
@@ -52,24 +55,19 @@ extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
-use crate::hal::can::*;
-use crate::hal::delay::Delay;
-use crate::hal::prelude::*;
-use crate::hal::stm32f103xx;
-use crate::hal::watchdog::IndependentWatchdog;
-use crate::rt::entry;
-use crate::rt::ExceptionFrame;
-use core::ops::Add;
-use embedded_hal::digital::InputPin;
-use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
+use crate::hal::{can::*, delay::Delay, prelude::*, stm32f103xx, watchdog::IndependentWatchdog};
+use crate::rt::{entry, ExceptionFrame};
+use embedded_hal::{
+	digital::InputPin,
+	watchdog::{Watchdog, WatchdogEnable},
+};
 use ir::NecReceiver;
-use onewire::{ds18x20::*, temperature::Temperature, *};
+use onewire::*;
 use room_pill::{
 	ac_switch::*,
-	dac,
 	ir_remote::*,
 	rgb::{Colors, RgbLed},
-	time::{Ticker, Ticks, Time},
+	time::{Duration, Ticker, Ticks, Time},
 };
 //use sh::hio;
 //use core::fmt::Write;
@@ -91,10 +89,10 @@ fn door_unit_main() -> ! {
 	let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
 
 	//Switces on A0, A1, A2, A3 (pull down once in each main period if closed)
-	let switch_d = AcSwitch::new(gpioa.pa0.into_pull_up_input(&mut gpioa.crl));
-	let switch_c = AcSwitch::new(gpioa.pa1.into_pull_up_input(&mut gpioa.crl));
-	let switch_a = AcSwitch::new(gpioa.pa2.into_pull_up_input(&mut gpioa.crl));
-	let switch_b = AcSwitch::new(gpioa.pa3.into_pull_up_input(&mut gpioa.crl));
+	let mut switch_d = AcSwitch::new(gpioa.pa0.into_pull_up_input(&mut gpioa.crl));
+	let mut switch_c = AcSwitch::new(gpioa.pa1.into_pull_up_input(&mut gpioa.crl));
+	let mut switch_a = AcSwitch::new(gpioa.pa2.into_pull_up_input(&mut gpioa.crl));
+	let mut switch_b = AcSwitch::new(gpioa.pa3.into_pull_up_input(&mut gpioa.crl));
 
 	// Motion alarm on A4 (pull down)
 	let motion_alarm = gpioa.pa4.into_pull_up_input(&mut gpioa.crl);
@@ -104,16 +102,16 @@ fn door_unit_main() -> ! {
 
 	// A6, A7 not used, connected to the ground
 	let _a6 = gpioa.pa6.into_pull_down_input(&mut gpioa.crl);
-	let _a7 = gpioa.pa6.into_pull_down_input(&mut gpioa.crl);
+	let _a7 = gpioa.pa7.into_pull_down_input(&mut gpioa.crl);
 
 	// Optional piezzo speaker on A8
 	let _piezzo = gpioa.pa8.into_open_drain_output(&mut gpioa.crh);
 
 	// Solid state relay connected to A9 drives the lamp_b
-	let lamp_b = gpioa.pa9.into_push_pull_output(&mut gpioa.crh);
+	let mut ssr_lamp_b = gpioa.pa9.into_push_pull_output(&mut gpioa.crh);
 
 	// Solid state relay connected to A10 drives the lamp_a
-	let lamp_a = gpioa.pa10.into_push_pull_output(&mut gpioa.crh);
+	let mut ssr_lamp_a = gpioa.pa10.into_push_pull_output(&mut gpioa.crh);
 
 	// CAN (RX, TX) on A11, A12
 	let canrx = gpioa.pa11.into_floating_input(&mut gpioa.crh);
@@ -163,7 +161,7 @@ fn door_unit_main() -> ! {
 	let dac = room_pill::dac::Pt8211::new(
 		gpiob.pb10.into_push_pull_output(&mut gpiob.crh), //use as SCL?
 		gpiob.pb11.into_push_pull_output(&mut gpiob.crh), //use as SDA?
-		gpiob.pb13.into_push_pull_output(&mut gpiob.crh), //word select (left / right^)
+		gpiob.pb12.into_push_pull_output(&mut gpiob.crh), //word select (left / right^)
 	);
 
 	// RGB led on PB13, PB14, PB15 as push pull output
@@ -179,9 +177,10 @@ fn door_unit_main() -> ! {
 	// C13 on board LED^
 	let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
+	// C14, C15 used on the bluepill board for 32768Hz xtal
+
 	watchdog.feed();
 
-	// C14, C15 used on the bluepill board for 32768Hz xtal
 	let cp = cortex_m::Peripherals::take().unwrap();
 
 	let mut flash = dp.FLASH.constrain();
@@ -194,8 +193,9 @@ fn door_unit_main() -> ! {
 
 	let mut last_time = tick.now();
 
-	let ac_period = Time::Duration::<room_pill::Time::Ticks>(tick.frequency / 50);
+	let ac_period = Duration::<room_pill::time::Ticks>::from(tick.frequency / 50);
 
+	//main update loop
 	loop {
 		watchdog.feed();
 
@@ -223,16 +223,15 @@ fn door_unit_main() -> ! {
 
 		if let (Some(last), Some(current)) = (switch_a.last_state(), switch_a.state()) {
 			if last != current {
-				lamp_a.toggle();
+				ssr_lamp_a.toggle();
 			}
 		};
 
 		if let (Some(last), Some(current)) = (switch_b.last_state(), switch_b.state()) {
 			if last != current {
-				lamp_b.toggle();
+				ssr_lamp_b.toggle();
 			}
 		};
-
 
 		// do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
 		if delta.count < tick.frequency {

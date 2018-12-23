@@ -2,7 +2,7 @@
 //! TDA1311A equivalent
 
 use embedded_hal::digital::OutputPin;
-use num_traits::int::*;
+//use num_traits::int::*;
 //use typenum::{U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U11, U12, U13, U14, U15, U16};
 
 pub struct Pt8211<CLKPIN, DATAPIN, WSPIN>
@@ -28,16 +28,13 @@ where
 
     //TODO lets be generic about the bit count of data
 
-    fn send_word<T>(&mut self, intensity: T)
-    where
-        T: PrimInt,
-    {
+    fn send_word(&mut self, intensity: u16) {
         //send MSB first
-        let n = 8 * core::mem::size_of::<T>() - 1;
-        let mut mask = T::one() << n;
+        let n = 15;
+        let mut mask = 1 << n;
 
-        while mask != T::zero() {
-            if (intensity & mask) != T::zero() {
+        while mask != 0 {
+            if (intensity & mask) != 0 {
                 self.data.set_high();
             } else {
                 self.data.set_low();
@@ -50,10 +47,7 @@ where
         }
     }
 
-    pub fn stereo<T>(&mut self, intensity_left: T, intensity_right: T)
-    where
-        T: PrimInt,
-    {
+    pub fn stereo(&mut self, intensity_left: u16, intensity_right: u16) {
         self.ws.set_high();
         self.send_word(intensity_left); //the previous sample sent out at the rising edge of the first clock of this (?)
         self.ws.set_low();
@@ -61,10 +55,7 @@ where
         self.ws.set_high();
     }
 
-    pub fn left_mono<T>(&mut self, intensity: T)
-    where
-        T: PrimInt,
-    {
+    pub fn left_mono(&mut self, intensity: u16) {
         self.ws.set_high();
         self.send_word(intensity); //the previous sample sent out at the rising edge of the first clock of this (?)
         self.ws.set_low();
@@ -72,10 +63,7 @@ where
         self.clk.set_low();
     }
 
-    pub fn right_mono<T>(&mut self, intensity: T)
-    where
-        T: PrimInt,
-    {
+    pub fn right_mono(&mut self, intensity: u16) {
         self.ws.set_low();
         self.send_word(intensity);
         self.ws.set_high();
