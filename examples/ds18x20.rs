@@ -15,13 +15,13 @@ extern crate onewire;
 extern crate panic_semihosting;
 extern crate stm32f103xx_hal as hal;
 
-use core::fmt::Write;
 use crate::hal::delay::Delay;
 use crate::hal::prelude::*;
 use crate::hal::stm32f103xx;
 use crate::rt::entry;
 use crate::rt::ExceptionFrame;
 use crate::sh::hio;
+use core::fmt::Write;
 
 use onewire::ds18x20::*;
 use onewire::*;
@@ -34,20 +34,23 @@ fn main() -> ! {
     let dp = stm32f103xx::Peripherals::take().unwrap();
 
     let mut flash = dp.FLASH.constrain();
+
+    //flash.acr.prftbe().enabled();//?? Configure Flash prefetch - Prefetch buffer is not available on value line devices
+    //scb().set_priority_grouping(NVIC_PRIORITYGROUP_4);
+
     let mut rcc = dp.RCC.constrain();
+    let clocks = rcc
+        .cfgr
+        .use_hse(8.mhz())
+        .sysclk(72.mhz())
+        .hclk(72.mhz())
+        .pclk1(36.mhz())
+        .pclk2(72.mhz())
+        .freeze(&mut flash.acr);
 
-    // Try a different clock configuration
-    let clocks = rcc.cfgr.freeze(&mut flash.acr);
-    //let clocks = rcc.cfgr
-    //    .sysclk(72.mhz())
-    //     .pclk1(32.mhz())
-    //    .freeze(&mut flash.acr);
-
-    //free PB3, PB4 from JTAG to be used as GPIO:
     let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
-    afio.mapr
-        .mapr()
-        .modify(|_, w| unsafe { w.swj_cfg().bits(1) });
+    // Disables the JTAG to free up pb3, pb4 and pa15 for normal use
+    afio.mapr.disable_jtag();
 
     let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
 
@@ -79,7 +82,8 @@ fn main() -> ! {
                                 "T = {} + {}/16 C",
                                 t.whole_degrees(),
                                 t.fraction_degrees()
-                            ).unwrap(),
+                            )
+                            .unwrap(),
                             Err(code) => writeln!(hstdout, "Error: {:?}", code).unwrap(),
                         }
                     }

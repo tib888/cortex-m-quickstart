@@ -1169,24 +1169,39 @@ impl<'a, 'b> Model<'a, 'b> {
 
 #[entry]
 fn main() -> ! {
-    let mut model = Model::new();
-
     let mut dp = stm32f103xx::Peripherals::take().unwrap();
 
     let mut watchdog = IndependentWatchdog::new(dp.IWDG);
     watchdog.start(2_000_000u32.us());
 
-    //let mut hstdout = hio::hstdout().unwrap();
-    let cp = cortex_m::Peripherals::take().unwrap();
+    let mut flash = dp.FLASH.constrain();
+
+    //flash.acr.prftbe().enabled();//?? Configure Flash prefetch - Prefetch buffer is not available on value line devices
+    //scb().set_priority_grouping(NVIC_PRIORITYGROUP_4);
 
     let mut rcc = dp.RCC.constrain();
-
-    let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
-    let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
-    let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
+    let clocks = rcc
+        .cfgr
+        .use_hse(8.mhz())
+        .sysclk(72.mhz())
+        .hclk(72.mhz())
+        .pclk1(36.mhz())
+        .pclk2(72.mhz())
+        .freeze(&mut flash.acr);
+    watchdog.feed();
 
     // real time clock
     let rtc = rtc::Rtc::new(dp.RTC, &mut rcc.apb1, &mut dp.PWR);
+    watchdog.feed();
+
+    let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
+    // Disables the JTAG to free up pb3, pb4 and pa15 for normal use
+    afio.mapr.disable_jtag();
+
+    //let mut hstdout = hio::hstdout().unwrap();
+    let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
+    let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
+    let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
 
     // IR receiver^
     let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
@@ -1209,12 +1224,6 @@ fn main() -> ! {
     // pump starter SSR^
     let mut pump = PumpSSR::new(gpiob.pb7.into_open_drain_output(&mut gpiob.crl));
 
-    let mut flash = dp.FLASH.constrain();
-    let clocks = rcc.cfgr.freeze(&mut flash.acr);
-    let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
-
-    watchdog.feed();
-
     // setup SPI for the lcd display:
     let sck = gpioa.pa5.into_push_pull_output(&mut gpioa.crl); //PA5 = Display SPI clock
     let mosi = gpioa.pa7.into_push_pull_output(&mut gpioa.crl); //PA7 = Display SPI data
@@ -1226,6 +1235,7 @@ fn main() -> ! {
     let cs = gpioa.pa2.into_push_pull_output(&mut gpioa.crl); // PA3 = Display ChipSelect^
     let mut rst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl); // PA1 = Display Reset^
 
+    let cp = cortex_m::Peripherals::take().unwrap();
     let mut delay = Delay::new(cp.SYST, clocks);
     let mut display = hx1230::gpio::Hx1230Gpio::new(sck, mosi, cs, &mut rst, &mut delay);
     display.init();
@@ -1238,10 +1248,6 @@ fn main() -> ! {
     watchdog.feed();
 
     // setup the one wire thermometers:
-    // free PB3, PB4 from JTAG to be used as GPIO:
-    afio.mapr
-        .mapr()
-        .modify(|_, w| unsafe { w.swj_cfg().bits(1) });
     let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
     let mut one_wire = OneWirePort::new(io, delay);
 
@@ -1269,6 +1275,8 @@ fn main() -> ! {
     );
 
     watchdog.feed();
+
+    let mut model = Model::new();
     can.configure(&model.can_config);
 
     watchdog.feed();

@@ -59,7 +59,9 @@ extern crate panic_semihosting;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
-use crate::hal::{can::*, delay::Delay, prelude::*, stm32f103xx, watchdog::IndependentWatchdog};
+use crate::hal::{
+	can::*, delay::Delay, prelude::*, rtc, stm32f103xx, watchdog::IndependentWatchdog,
+};
 use crate::rt::{entry, ExceptionFrame};
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use ir::NecReceiver;
@@ -84,7 +86,30 @@ fn window_unit_main() -> ! {
 	let mut watchdog = IndependentWatchdog::new(dp.IWDG);
 	watchdog.start(2_000_000u32.us());
 
+	let mut flash = dp.FLASH.constrain();
+
+	//flash.acr.prftbe().enabled();//?? Configure Flash prefetch - Prefetch buffer is not available on value line devices
+	//scb().set_priority_grouping(NVIC_PRIORITYGROUP_4);
+
 	let mut rcc = dp.RCC.constrain();
+	let clocks = rcc
+		.cfgr
+		.use_hse(8.mhz())
+		.sysclk(72.mhz())
+		.hclk(72.mhz())
+		.pclk1(36.mhz())
+		.pclk2(72.mhz())
+		//.adcclk(12.mhz())
+		.freeze(&mut flash.acr);
+	watchdog.feed();
+
+	// real time clock
+	let rtc = rtc::Rtc::new(dp.RTC, &mut rcc.apb1, &mut dp.PWR);
+	watchdog.feed();
+
+	let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
+	// Disables the JTAG to free up pb3, pb4 and pa15 for normal use
+	afio.mapr.disable_jtag();
 
 	//configure pins:
 	let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
@@ -122,9 +147,7 @@ fn window_unit_main() -> ! {
 	// CAN (RX, TX) on A11, A12
 	let canrx = gpioa.pa11.into_floating_input(&mut gpioa.crh);
 	let cantx = gpioa.pa12.into_alternate_push_pull(&mut gpioa.crh);
-
 	// USB is needed here because it can not be used at the same time as CAN since they share memory:
-	let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
 	let mut can = Can::can1(
 		dp.CAN,
 		(cantx, canrx),
@@ -148,10 +171,6 @@ fn window_unit_main() -> ! {
 	let _b3 = gpiob.pb3.into_pull_down_input(&mut gpiob.crl);
 
 	// DS18B20 1-wire temperature sensors connected to B4 GPIO
-	// (JTAG is removed first from B3, B4 to make it work)
-	afio.mapr
-		.mapr()
-		.modify(|_, w| unsafe { w.swj_cfg().bits(1) });
 	let mut onewire_io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
 
 	// B5 not used, connected to the ground
