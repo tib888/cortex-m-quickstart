@@ -855,7 +855,7 @@ impl<'a, 'b> Model<'a, 'b> {
         idx
     }
 
-    fn update_programmed_target(&mut self) {
+    fn update_programmed_target(&mut self, force_refresh: bool) {
         if let ProgramModes::Fix(temp) = self.mode {
             self.floor_heating_config.target_air_temperature = Some(temp);
             return;
@@ -908,7 +908,7 @@ impl<'a, 'b> Model<'a, 'b> {
         // }
 
         //the user override live until program change:
-        if self.current_program_index != idx {
+        if self.current_program_index != idx || force_refresh {
             self.current_program_index = idx;
 
             let offset = if let ProgramModes::Economy(offset) = self.mode {
@@ -992,7 +992,7 @@ impl<'a, 'b> Model<'a, 'b> {
                 }
                 IrCommands::Red => {
                     self.mode = ProgramModes::Party(self.weektime.weekday);
-                    self.current_program_index += 1; //just  for triggering a refresh
+                    self.update_programmed_target(true);
                 }
                 IrCommands::Green => {
                     self.mode =
@@ -1001,11 +1001,11 @@ impl<'a, 'b> Model<'a, 'b> {
                         } else {
                             Temperature::from_celsius(-2, 0)
                         });
-                    self.current_program_index += 1; //just  for triggering a refresh
+                    self.update_programmed_target(true);
                 }
                 IrCommands::Yellow => {
                     self.mode = ProgramModes::Normal;
-                    self.current_program_index += 1; //just  for triggering a refresh
+                    self.update_programmed_target(true);
                 }
                 IrCommands::Blue => {
                     self.mode = ProgramModes::Fix(if let ProgramModes::Fix(target) = self.mode {
@@ -1018,24 +1018,25 @@ impl<'a, 'b> Model<'a, 'b> {
                             Temperature::from_celsius(12, 0)
                         }
                     });
-                    self.current_program_index += 1; //just  for triggering a refresh
+                    self.update_programmed_target(true);
 
                     // self.mode = if let ProgramModes::Away((days, hour)) = self.mode {
                     //     ProgramModes::Away((days, (hour + 1) % 24))
                     // } else {
                     //     ProgramModes::Away((1, self.weektime.hour.into()))
                     // };
-                    // self.model.current_program_index += 1;//just  for triggering a refresh
+                    // force_refresh = true;
                 }
                 IrCommands::Up => match self.mode {
                     // ProgramModes::Away((days, hour)) => {
                     //     self.mode = ProgramModes::Away((days + 1, hour))
                     // }
                     ProgramModes::Economy(offset) => {
-                        self.mode = ProgramModes::Economy(offset + Temperature::from_celsius(0, 1))
+                        self.mode = ProgramModes::Economy(offset + Temperature::from_celsius(0, 1));
+                        self.update_programmed_target(true);
                     }
                     ProgramModes::Fix(target) => {
-                        self.mode = ProgramModes::Fix(target + Temperature::from_celsius(0, 1))
+                        self.mode = ProgramModes::Fix(target + Temperature::from_celsius(0, 1));
                     }
                     _ => {}
                 },
@@ -1044,16 +1045,17 @@ impl<'a, 'b> Model<'a, 'b> {
                     //     self.mode = ProgramModes::Away((if days > 0 { days - 1 } else { 0 }, hour))
                     // }
                     ProgramModes::Economy(offset) => {
-                        self.mode = ProgramModes::Economy(offset - Temperature::from_celsius(0, 1))
+                        self.mode = ProgramModes::Economy(offset - Temperature::from_celsius(0, 1));
+                        self.update_programmed_target(true);
                     }
                     ProgramModes::Fix(target) => {
-                        self.mode = ProgramModes::Fix(target - Temperature::from_celsius(0, 1))
+                        self.mode = ProgramModes::Fix(target - Temperature::from_celsius(0, 1));
                     }
                     _ => {}
                 },
                 _ => {}
             }
-        }
+        };
     }
 
     //update by temp sensors
@@ -1412,7 +1414,7 @@ fn main() -> ! {
             unit: PhantomData::<Seconds>,
         });
 
-        model.update_programmed_target();
+        model.update_programmed_target(false);
 
         // drive outputs, send messages:
 

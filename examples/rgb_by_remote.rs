@@ -41,7 +41,7 @@ impl Time {
 }
 
 impl ir::Instant for Time {
-    /// called on an older instant, returns te elapsed microseconds until the given now
+    /// called on an older instant, returns the elapsed microseconds until the given now
     fn elapsed_us_till(&self, now: &Self) -> u32 {
         self.now.elapsed_till(&now.now) * 1_000_000u32 / self.freq
     }
