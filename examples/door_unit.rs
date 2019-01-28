@@ -220,7 +220,7 @@ fn door_unit_main() -> ! {
     watchdog.feed();
 
     //update the IR receiver statemachine:
-    let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
+    let ir_cmd = receiver.receive(&tick, tick.now(), ir_receiver.is_low());
 
     match ir_cmd {
       Ok(ir::NecContent::Repeat) => {}

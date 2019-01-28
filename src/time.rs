@@ -46,7 +46,7 @@ impl Ticker {
 }
 
 impl DurationCalculator<Time<Ticks>> for Ticker {
-    /// returns the elapsed microseconds until the now
+    /// returns the elapsed microseconds from past to now
     fn elapsed_us_between(&self, now: Time<Ticks>, past: Time<Ticks>) -> u32 {
         now.instant.wrapping_sub(past.instant) / self.to_us
     }

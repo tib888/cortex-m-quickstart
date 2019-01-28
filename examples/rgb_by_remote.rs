@@ -40,10 +40,10 @@ impl Time {
     }
 }
 
-impl ir::Instant for Time {
-    /// called on an older instant, returns the elapsed microseconds until the given now
-    fn elapsed_us_till(&self, now: &Self) -> u32 {
-        self.now.elapsed_till(&now.now) * 1_000_000u32 / self.freq
+impl ir::DurationCalculator<Time> for Time {
+    /// returns the elapsed microseconds from past to now
+    fn elapsed_us_between(&self, now: Time, past: Time) -> u32 {
+        past.now.elapsed_till(&now.now) / (self.freq / 1_000_000)
     }
 }
 
@@ -82,7 +82,7 @@ fn main() -> ! {
 
     loop {
         let t = Time::new(&tick);
-        let ir_cmd = receiver.receive(t, ir_receiver.is_low());
+        let ir_cmd = receiver.receive(&t, t, ir_receiver.is_low());
 
         let c = match ir_cmd {
             Ok(ir::NecContent::Repeat) => None,
