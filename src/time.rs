@@ -5,7 +5,7 @@ use core::ops::Sub;
 use cortex_m::peripheral::DCB;
 use cortex_m::peripheral::DWT;
 
-use ir::Instant;
+use ir::DurationCalculator;
 use stm32f103xx_hal::rcc::Clocks;
 
 // impl Time {
@@ -19,7 +19,8 @@ use stm32f103xx_hal::rcc::Clocks;
 // }
 
 pub struct Ticker {
-    pub frequency: u32, //herz
+    pub frequency: u32, // herz
+    to_us: u32,         // frequency / 1_000_000
 }
 
 impl Ticker {
@@ -32,6 +33,7 @@ impl Ticker {
 
         Ticker {
             frequency: clocks.sysclk().0,
+            to_us: clocks.sysclk().0 / 1_000_000,
         }
     }
 
@@ -43,15 +45,11 @@ impl Ticker {
     }
 }
 
-impl Instant for Time<Ticks> {
-    /// called on an older instant, returns the elapsed microseconds until the given now
-    fn elapsed_us_till(&self, now: &Self) -> u32 {
-        now.instant.wrapping_sub(self.instant) >> 3 //8Mhz clock, so div by 8
+impl DurationCalculator<Time<Ticks>> for Ticker {
+    /// returns the elapsed microseconds until the now
+    fn elapsed_us_between(&self, now: Time<Ticks>, past: Time<Ticks>) -> u32 {
+        now.instant.wrapping_sub(past.instant) / self.to_us
     }
-
-    // fn elapsed_us_till(&self, now: &Self) -> Duration<MicroSeconds> {
-    //     self.elapsed_till(&now) >> 3 //8Mhz clock, so div by 8
-    // }
 }
 
 /// Time unit marker

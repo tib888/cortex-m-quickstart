@@ -1375,7 +1375,7 @@ fn main() -> ! {
         // };
 
         //update the IR receiver statemachine:
-        let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
+        let ir_cmd = receiver.receive(&tick, tick.now(), ir_receiver.is_low());
 
         match ir_cmd {
             Ok(ir::NecContent::Repeat) => {}
@@ -1448,7 +1448,11 @@ fn main() -> ! {
                     rgb.color(Colors::Purple);
                     "...Olvasztas"
                 } else {
-                    rgb.color(Colors::Red);
+                    rgb.color(if (model.time.instant & 1) != 0 {
+                        Colors::Yellow
+                    } else {
+                        Colors::Red
+                    });
                     "...Futes"
                 }
             }
@@ -1470,7 +1474,11 @@ fn main() -> ! {
                 pump.start();
                 heat_request.set_low();
                 //CAN: stop heat request
-                rgb.color(Colors::Yellow);
+                rgb.color(if (model.time.instant & 1) != 0 {
+                    Colors::Yellow
+                } else {
+                    Colors::Green
+                });
                 "Utokeringetes"
             }
             floor_heating::State::Standby(_) => {
@@ -1495,6 +1503,9 @@ fn main() -> ! {
                 "Szenzorhiba"
             }
         };
+
+        //TODO count the seconds while the heating is active
+        //display the daily active %
 
         model.refresh_display(&mut display, &mut backlight);
 

@@ -44,7 +44,7 @@ fn main() -> ! {
 
     loop {
         let t = tick.now();
-        let ir_cmd = receiver.receive(t, ir_receiver.is_low());
+        let ir_cmd = receiver.receive(&tick, t, ir_receiver.is_low());
         print_ir_command(&ir_cmd);
     }
 }
