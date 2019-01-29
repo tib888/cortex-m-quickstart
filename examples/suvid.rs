@@ -33,11 +33,10 @@ extern crate cortex_m;
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
-extern crate ir;
 extern crate lcd_hal;
 extern crate nb;
 extern crate onewire;
-extern crate panic_semihosting;
+extern crate panic_halt;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
@@ -49,6 +48,7 @@ use lcd_hal::{hx1230, hx1230::Hx1230};
 use onewire::{ds18x20::*, temperature::Temperature, *};
 use room_pill::{
     display::*,
+    ir,
     ir_remote::*,
     rgb::*,
     time::{Duration, Ticker, Ticks, Time},
@@ -241,7 +241,7 @@ fn main() -> ! {
         watchdog.feed();
 
         //update the IR receiver statemachine:
-        let ir_cmd = receiver.receive(&tick, tick.now(), ir_receiver.is_low());
+        let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
 
         match ir_cmd {
             Ok(ir::NecContent::Repeat) => {}
@@ -257,17 +257,17 @@ fn main() -> ! {
         let delta = tick.now() - last_time;
 
         // do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
-        if delta.count < tick.frequency {
+        if delta < 1u32.s() {
             continue;
         }
 
         led.toggle();
 
         // decrease the time resolution
-        let delta_time = Duration::sec(delta.count / tick.frequency);
+        let delta_time = Duration<Seconds>::from(delta);
 
         // keep the difference measurement accurate by keeping the fractions...
-        last_time = last_time + Duration::<Ticks>::from(delta_time.count * tick.frequency);
+        last_time = last_time + Duration::<Ticks>::from(delta_time);
 
         //read sensors and restart temperature measurement
         for i in 0..count {

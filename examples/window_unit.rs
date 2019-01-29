@@ -52,10 +52,9 @@ extern crate cortex_m;
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
-extern crate ir;
 extern crate nb;
 extern crate onewire;
-extern crate panic_semihosting;
+extern crate panic_halt;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
@@ -64,10 +63,11 @@ use crate::hal::{
 };
 use crate::rt::{entry, ExceptionFrame};
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
-use ir::NecReceiver;
 use onewire::*;
 use room_pill::{
 	ac_switch::*,
+	ir,
+	ir::NecReceiver,
 	ir_remote::*,
 	rgb::{Colors, RgbLed},
 	time::{Duration, Ticker, Ticks, Time},
@@ -225,7 +225,7 @@ fn window_unit_main() -> ! {
 		watchdog.feed();
 
 		//update the IR receiver statemachine:
-		let ir_cmd = receiver.receive(&tick, tick.now(), ir_receiver.is_low());
+		let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
 
 		match ir_cmd {
 			Ok(ir::NecContent::Repeat) => {}
@@ -261,7 +261,7 @@ fn window_unit_main() -> ! {
 		};
 
 		// do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
-		if delta.count < tick.frequency {
+		if delta < 1u32.s() {
 			continue;
 		}
 

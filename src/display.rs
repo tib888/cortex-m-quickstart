@@ -1,5 +1,4 @@
-use crate::time::{Duration, Seconds};
-use crate::week_time::*;
+use crate::time::{Duration, Seconds, WeekTime};
 use onewire::temperature::Temperature;
 
 static WEEKDAYS: [&[u8]; 7] = [
@@ -28,10 +27,7 @@ pub fn fmt_nn(n: u8) -> &'static [u8] {
 }
 
 pub fn fmt_duration(duration: Duration<Seconds>) -> &'static [u8] {
-    let t = duration.count;
-    //assert!(t < 100 * 60);
-    let min = (t / 60) as u8;
-    let sec = (t % 60) as u8;
+    let (_, min, sec) = duration.to_hms();
     static mut TEXT: [u8; 5] = [0u8; 5];
     unsafe {
         TEXT[0] = '0' as u8 + (min / 10u8);

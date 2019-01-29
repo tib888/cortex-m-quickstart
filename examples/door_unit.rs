@@ -48,10 +48,9 @@ extern crate cortex_m;
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
-extern crate ir;
 extern crate nb;
 extern crate onewire;
-extern crate panic_semihosting;
+extern crate panic_halt;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
@@ -67,10 +66,12 @@ use ir::NecReceiver;
 use onewire::*;
 use room_pill::{
   ac_switch::*,
+  ir,
   ir_remote::*,
   rgb::{Colors, RgbLed},
   time::{Duration, Ticker, Ticks, Time},
 };
+
 //use sh::hio;
 //use core::fmt::Write;
 
@@ -213,14 +214,14 @@ fn door_unit_main() -> ! {
 
   let mut last_time = tick.now();
 
-  let ac_period = Duration::<room_pill::time::Ticks>::from(tick.frequency / 50);
+  let ac_period = Duration::<Ticks>::from_ms(room_pill::time::U32Ext::ms(20), tick.frequency); //50Hz
 
   //main update loop
   loop {
     watchdog.feed();
 
     //update the IR receiver statemachine:
-    let ir_cmd = receiver.receive(&tick, tick.now(), ir_receiver.is_low());
+    let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
 
     match ir_cmd {
       Ok(ir::NecContent::Repeat) => {}
@@ -254,7 +255,7 @@ fn door_unit_main() -> ! {
     };
 
     // do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
-    if delta.count < tick.frequency {
+    if delta < Duration::<Ticks>::from_s(room_pill::time::U32Ext::s(1), tick.frequency) {
       continue;
     }
 

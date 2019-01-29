@@ -11,9 +11,8 @@ extern crate cortex_m;
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
-extern crate ir;
 extern crate onewire;
-extern crate panic_semihosting;
+extern crate panic_halt;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
@@ -22,8 +21,7 @@ use crate::hal::stm32f103xx;
 use crate::hal::time::*;
 use crate::rt::entry;
 use crate::rt::ExceptionFrame;
-use ir::NecReceiver;
-use room_pill::rgb::*;
+use room_pill::{ir, ir::NecReceiver, rgb::*};
 
 #[derive(Copy, Clone)]
 struct Time {
@@ -37,13 +35,6 @@ impl Time {
             now: tick.now(),
             freq: tick.frequency().0,
         }
-    }
-}
-
-impl ir::DurationCalculator<Time> for Time {
-    /// returns the elapsed microseconds from past to now
-    fn elapsed_us_between(&self, now: Time, past: Time) -> u32 {
-        past.now.elapsed_till(&now.now) / (self.freq / 1_000_000)
     }
 }
 
@@ -82,7 +73,7 @@ fn main() -> ! {
 
     loop {
         let t = Time::new(&tick);
-        let ir_cmd = receiver.receive(&t, t, ir_receiver.is_low());
+        let ir_cmd = receiver.receive(t, ir_receiver.is_low());
 
         let c = match ir_cmd {
             Ok(ir::NecContent::Repeat) => None,

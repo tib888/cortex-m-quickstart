@@ -33,16 +33,16 @@ extern crate cortex_m;
 extern crate cortex_m_rt as rt;
 extern crate cortex_m_semihosting as sh;
 extern crate embedded_hal;
-extern crate ir;
 extern crate lcd_hal;
 extern crate nb;
 extern crate onewire;
-extern crate panic_semihosting;
+extern crate panic_halt;
 extern crate room_pill;
 extern crate stm32f103xx_hal as hal;
 
 use crate::hal::{
-    can::*, delay::Delay, prelude::*, rtc, stm32f103xx, watchdog::IndependentWatchdog,
+    afio::AfioExt, can::*, delay::Delay, flash::FlashExt, gpio::GpioExt, rcc::RccExt, rtc,
+    stm32f103xx, watchdog::IndependentWatchdog,
 };
 use crate::rt::ExceptionFrame;
 use core::marker::PhantomData;
@@ -52,14 +52,13 @@ use lcd_hal::{hx1230, hx1230::Hx1230};
 use onewire::{ds18x20::*, temperature::Temperature, *};
 use room_pill::{
     display::*,
-    floor_heating,
+    floor_heating, ir,
     ir_remote::*,
     menu::*,
     pump::*,
     rgb::*,
-    time::{Duration, Seconds, Ticker, Ticks, Time},
+    time::{Duration, Seconds, Ticker, Ticks, Time, U32Ext, WeekTime},
     valve::*,
-    week_time::*,
 };
 use rt::entry;
 //use sh::hio;
@@ -387,12 +386,14 @@ fn set_after_circulation(model: &mut Model, command: IrCommands) {
     match command {
         IrCommands::Right => {
             model.floor_heating_config.after_circulation_duration =
-                model.floor_heating_config.after_circulation_duration + Duration::hms(0, 0, 15);
+                model.floor_heating_config.after_circulation_duration + 15u32.s();
         }
         IrCommands::Left => {
-            if model.floor_heating_config.after_circulation_duration > Duration::hms(0, 0, 15) {
+            if model.floor_heating_config.after_circulation_duration > Duration::from_hms(0, 0, 15)
+            {
                 model.floor_heating_config.after_circulation_duration =
-                    model.floor_heating_config.after_circulation_duration - Duration::hms(0, 0, 15);
+                    model.floor_heating_config.after_circulation_duration
+                        - Duration::from_hms(0, 0, 15);
             }
         }
         _ => {}
@@ -402,12 +403,12 @@ fn set_pre_circulation(model: &mut Model, command: IrCommands) {
     match command {
         IrCommands::Right => {
             model.floor_heating_config.pre_circulation_duration =
-                model.floor_heating_config.pre_circulation_duration + Duration::hms(0, 0, 15);
+                model.floor_heating_config.pre_circulation_duration + 15.s();
         }
         IrCommands::Left => {
-            if model.floor_heating_config.pre_circulation_duration > Duration::hms(0, 0, 15) {
+            if model.floor_heating_config.pre_circulation_duration > 15.s() {
                 model.floor_heating_config.pre_circulation_duration =
-                    model.floor_heating_config.pre_circulation_duration - Duration::hms(0, 0, 15);
+                    model.floor_heating_config.pre_circulation_duration - 15.s();
             }
         }
         _ => {}
@@ -550,7 +551,7 @@ struct Model<'a, 'b> {
     can_config: Configuration,
     floor_heating_config: floor_heating::Config<Temperature, Duration<Seconds>>,
     backlight_timeout: Duration<Seconds>, //time in seconds before backlight tuns off
-    time_offset: u32,                     //used for rtc to weektime calibration
+    time_offset: Duration<Seconds>,       //used for rtc to weektime calibration
     program: [ProgramEntry; (DAYS_PER_WEEK * PROGRAMS_PER_DAY) as usize],
 
     //state:
@@ -597,196 +598,196 @@ impl<'a, 'b> Model<'a, 'b> {
                 freeze_protection: floor_heating::FreezeProtectionConfig {
                     min_temperature: Temperature::from_celsius(5, 0),
                     safe_temperature: Temperature::from_celsius(8, 0),
-                    check_interval: Duration::<Seconds>::hms(4, 0, 0), //4 hour
-                    check_duration: Duration::<Seconds>::hms(0, 4, 0), //4 min
+                    check_interval: Duration::<Seconds>::from_hms(4, 0, 0), //4 hour
+                    check_duration: Duration::<Seconds>::from_hms(0, 4, 0), //4 min
                 },
-                pre_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
-                after_circulation_duration: Duration::<Seconds>::hms(0, 4, 0),
+                pre_circulation_duration: Duration::<Seconds>::from_hms(0, 4, 0),
+                after_circulation_duration: Duration::<Seconds>::from_hms(0, 4, 0),
             },
 
-            backlight_timeout: Duration::<Seconds>::hms(0, 1, 0),
+            backlight_timeout: Duration::<Seconds>::from_hms(0, 1, 0),
 
-            time_offset: 0u32,
+            time_offset: 0u32.s(),
 
             program: [
                 //monday:
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(0, 6, 15, 0),
+                    start_time: Time::<Seconds>::from_dhms(0, 6, 15, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(0, 7, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(0, 7, 30, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(0, 12, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(0, 12, 30, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(0, 14, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(0, 14, 30, 0),
                     target_air_temperature: Temperature::from_celsius(18, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(0, 17, 00, 0),
+                    start_time: Time::<Seconds>::from_dhms(0, 17, 00, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(0, 20, 0, 0),
+                    start_time: Time::<Seconds>::from_dhms(0, 20, 0, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 //tuesday:
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(1, 6, 15, 0),
+                    start_time: Time::<Seconds>::from_dhms(1, 6, 15, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(1, 7, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(1, 7, 30, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(1, 12, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(1, 12, 30, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(1, 14, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(1, 14, 30, 0),
                     target_air_temperature: Temperature::from_celsius(18, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(1, 17, 00, 0),
+                    start_time: Time::<Seconds>::from_dhms(1, 17, 00, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(1, 20, 0, 0),
+                    start_time: Time::<Seconds>::from_dhms(1, 20, 0, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 //wednesday:
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(2, 6, 15, 0),
+                    start_time: Time::<Seconds>::from_dhms(2, 6, 15, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(2, 7, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(2, 7, 30, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(2, 12, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(2, 12, 30, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(2, 14, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(2, 14, 30, 0),
                     target_air_temperature: Temperature::from_celsius(18, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(2, 17, 00, 0),
+                    start_time: Time::<Seconds>::from_dhms(2, 17, 00, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(2, 20, 0, 0),
+                    start_time: Time::<Seconds>::from_dhms(2, 20, 0, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 //thursday:
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(3, 6, 15, 0),
+                    start_time: Time::<Seconds>::from_dhms(3, 6, 15, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(3, 7, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(3, 7, 30, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(3, 12, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(3, 12, 30, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(3, 14, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(3, 14, 30, 0),
                     target_air_temperature: Temperature::from_celsius(18, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(3, 17, 00, 0),
+                    start_time: Time::<Seconds>::from_dhms(3, 17, 00, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(3, 20, 0, 0),
+                    start_time: Time::<Seconds>::from_dhms(3, 20, 0, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 //friday:
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 6, 15, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 6, 15, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 7, 30, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 12, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 12, 30, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 14, 30, 0),
                     target_air_temperature: Temperature::from_celsius(18, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 17, 00, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 21, 0, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 21, 0, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 //saturday:
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 7, 15, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 7, 15, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 7, 30, 0),
                     target_air_temperature: Temperature::from_celsius(19, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 11, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 11, 30, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 14, 30, 0),
                     target_air_temperature: Temperature::from_celsius(19, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 17, 00, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 21, 0, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 21, 0, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
                 //sunday:
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 7, 15, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 7, 15, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 7, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 7, 30, 0),
                     target_air_temperature: Temperature::from_celsius(19, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 11, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 11, 30, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 14, 30, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 14, 30, 0),
                     target_air_temperature: Temperature::from_celsius(19, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 17, 00, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 17, 00, 0),
                     target_air_temperature: Temperature::from_celsius(20, 0),
                 },
                 ProgramEntry {
-                    start_time: Time::<Seconds>::dhms(4, 20, 0, 0),
+                    start_time: Time::<Seconds>::from_dhms(4, 20, 0, 0),
                     target_air_temperature: Temperature::from_celsius(17, 0),
                 },
             ],
 
-            floor_heating_state: floor_heating::State::Standby(Duration::sec(0)),
+            floor_heating_state: floor_heating::State::Standby(0.s()),
             temperatures: [None; MAX_THERMOMETER_COUNT],
             time: Time::<Seconds> {
                 instant: 0,
@@ -803,16 +804,12 @@ impl<'a, 'b> Model<'a, 'b> {
 
     ///set weektime from self.time.instant + self.time_offset
     fn update_weektime(&mut self) {
-        self.weektime = WeekTime::from(Time::<Seconds>::from(
-            self.time.instant.wrapping_add(self.time_offset),
-        ));
+        self.weektime = WeekTime::from(Time::<Seconds>::from(self.time + self.time_offset));
     }
 
     ///set timeoffset from self.weektime - self.time.instant
     fn update_time_offset(&mut self) {
-        self.time_offset = Time::<Seconds>::from(self.weektime)
-            .instant
-            .wrapping_sub(self.time.instant);
+        self.time_offset = Time::<Seconds>::from(self.weektime) - self.time;
     }
 
     //update by real time clock
@@ -846,7 +843,7 @@ impl<'a, 'b> Model<'a, 'b> {
         let mut idx = self.program.len() - 1;
         let now = Time::<Seconds>::from(self.weektime);
         for i in 0..self.program.len() {
-            if self.program[i].start_time.instant < now.instant {
+            if self.program[i].start_time < now {
                 idx = i;
             } else {
                 break;
@@ -928,7 +925,7 @@ impl<'a, 'b> Model<'a, 'b> {
         command: IrCommands,
         root_menu: &'a Menu<'a, Model<'a, '_>, IrCommands>,
     ) {
-        self.backlight_timeout = Duration::hms(0, 0, 20);
+        self.backlight_timeout = 20.s();
 
         if let Some(active_menu) = self.active_menu {
             let n = active_menu.rows.len();
@@ -1172,7 +1169,7 @@ fn main() -> ! {
     let mut dp = stm32f103xx::Peripherals::take().unwrap();
 
     let mut watchdog = IndependentWatchdog::new(dp.IWDG);
-    watchdog.start(2_000_000u32.us());
+    watchdog.start(hal::time::U32Ext::us(2_000_000u32));
 
     let mut flash = dp.FLASH.constrain();
 
@@ -1182,11 +1179,11 @@ fn main() -> ! {
     let mut rcc = dp.RCC.constrain();
     let clocks = rcc
         .cfgr
-        .use_hse(8.mhz())
-        .sysclk(72.mhz())
-        .hclk(72.mhz())
-        .pclk1(36.mhz())
-        .pclk2(72.mhz())
+        .use_hse(hal::time::U32Ext::mhz(8))
+        .sysclk(hal::time::U32Ext::mhz(72))
+        .hclk(hal::time::U32Ext::mhz(72))
+        .pclk1(hal::time::U32Ext::mhz(36))
+        .pclk2(hal::time::U32Ext::mhz(72))
         .freeze(&mut flash.acr);
     watchdog.feed();
 

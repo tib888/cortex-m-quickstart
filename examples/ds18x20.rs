@@ -12,7 +12,7 @@ extern crate embedded_hal;
 extern crate cortex_m_rt as rt;
 extern crate nb;
 extern crate onewire;
-extern crate panic_semihosting;
+extern crate panic_halt;
 extern crate stm32f103xx_hal as hal;
 
 use crate::hal::delay::Delay;
