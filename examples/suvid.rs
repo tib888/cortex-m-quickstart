@@ -51,7 +51,7 @@ use room_pill::{
     ir,
     ir_remote::*,
     rgb::*,
-    time::{Duration, Ticker, Ticks, Time},
+    time::{Duration, Ticker, SysTicks, Seconds Time},
 };
 use rt::entry;
 
@@ -188,8 +188,8 @@ fn main() -> ! {
 
     watchdog.feed();
 
-    let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
-    let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
+    let ticker = Ticker::new(cp.DWT, cp.DCB, clocks);
+    let mut receiver = ir::IrReceiver::<Time<u32, SysTicks>>::new();
 
     watchdog.feed();
 
@@ -235,13 +235,13 @@ fn main() -> ! {
     let roms = roms;
     let count = count;
 
-    let mut last_time = tick.now();
+    let mut last_time = ticker.now();
 
     loop {
         watchdog.feed();
 
         //update the IR receiver statemachine:
-        let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
+        let ir_cmd = receiver.receive(ticker.now(), ir_receiver.is_low());
 
         match ir_cmd {
             Ok(ir::NecContent::Repeat) => {}
@@ -254,7 +254,7 @@ fn main() -> ! {
         }
 
         // calculate the time since last execution:
-        let delta = tick.now() - last_time;
+        let delta = ticker.now() - last_time;
 
         // do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
         if delta < 1u32.s() {
@@ -264,10 +264,10 @@ fn main() -> ! {
         led.toggle();
 
         // decrease the time resolution
-        let delta_time = Duration<Seconds>::from(delta);
+        let delta_time = Duration::<u32, Seconds>::from(delta);
 
         // keep the difference measurement accurate by keeping the fractions...
-        last_time = last_time + Duration::<Ticks>::from(delta_time);
+        last_time = last_time + Duration::<u32, SysTicks>::from(delta_time);
 
         //read sensors and restart temperature measurement
         for i in 0..count {

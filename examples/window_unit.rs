@@ -70,7 +70,7 @@ use room_pill::{
 	ir::NecReceiver,
 	ir_remote::*,
 	rgb::{Colors, RgbLed},
-	time::{Duration, Ticker, Ticks, Time},
+	time::{Duration, Seconds, SysTicks, Ticker, Time},
 };
 //use sh::hio;
 //use core::fmt::Write;
@@ -213,12 +213,12 @@ fn window_unit_main() -> ! {
 	let mut delay = Delay::new(cp.SYST, clocks);
 	let mut one_wire = OneWirePort::new(onewire_io, delay);
 
-	let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
-	let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
+	let ticker = Ticker::new(cp.DWT, cp.DCB, clocks);
+	let mut receiver = ir::IrReceiver::<Time<u32, SysTicks>>::new();
 
-	let mut last_time = tick.now();
+	let mut last_time = ticker.now();
 
-	let ac_period = Duration::<room_pill::time::Ticks>::from(tick.frequency / 50);
+	let ac_period = Duration::<SysTicks>::from(20.ms());
 
 	//main update loop
 	loop {

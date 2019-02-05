@@ -69,7 +69,7 @@ use room_pill::{
   ir,
   ir_remote::*,
   rgb::{Colors, RgbLed},
-  time::{Duration, Ticker, Ticks, Time},
+  time::{Duration, Ticker, Time},
 };
 
 //use sh::hio;

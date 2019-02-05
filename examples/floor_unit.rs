@@ -1389,7 +1389,7 @@ fn main() -> ! {
         let delta = tick.now() - last_time;
 
         // do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
-        if delta.count < tick.frequency {
+        if delta < 1.s() {
             continue;
         }
 

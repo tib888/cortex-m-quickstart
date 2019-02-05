@@ -1,12 +1,12 @@
 //! NEC Infrared transmission protocol
 // ```
-//      ________________          _   _   _     _   _   _   _   _   _     _     _     _     _   _   _   _   _   _     _   _   _   _   _   _   _     _   _     _     _     _     _     _     _                                                                               ________________       _                       
+//      ________________          _   _   _     _   _   _   _   _   _     _     _     _     _   _   _   _   _   _     _   _   _   _   _   _   _     _   _     _     _     _     _     _     _                                                                               ________________       _
 // ____|                |________| |_| |_| |___| |_| |_| |_| |_| |_| |___| |___| |___| |___| |_| |_| |_| |_| |_| |___| |_| |_| |_| |_| |_| |_| |___| |_| |___| |___| |___| |___| |___| |___| |_____________________________________________________________________________|                |_____| |______________________
-//     | data code lead          |  0   0     1   0   0   0   0   0     1     1     1     1   0   0   0   0   0     1   0   0   0   0   0   0     1   0     1     1     1     1     1     1 |                                                                               repeat code lead       |       
+//     | data code lead          |  0   0     1   0   0   0   0   0     1     1     1     1   0   0   0   0   0     1   0   0   0   0   0   0     1   0     1     1     1     1     1     1 |                                                                               repeat code lead       |
 //
-//     ________________        _ _ _   _ _ _ _ _ _   _   _   _   _ _ _ _ _ _   _ _ _ _ _ _ _   _ _   _   _   _   _   _   _                                                                             ________________     _                     
+//     ________________        _ _ _   _ _ _ _ _ _   _   _   _   _ _ _ _ _ _   _ _ _ _ _ _ _   _ _   _   _   _   _   _   _                                                                             ________________     _
 // ____                ________ _ _ ___ _ _ _ _ _ ___ ___ ___ ___ _ _ _ _ _ ___ _ _ _ _ _ _ ___ _ ___ ___ ___ ___ ___ ___ _____________________________________________________________________________                _____ ______________________
-//    | data code lead        | 0 0   1 0 0 0 0 0   1   1   1   1 0 0 0 0 0   1 0 0 0 0 0 0   1 0   1   1   1   1   1   1 |                                                                           |repeat code lead    | |       
+//    | data code lead        | 0 0   1 0 0 0 0 0   1   1   1   1 0 0 0 0 0   1 0 0 0 0 0 0   1 0   1   1   1   1   1   1 |                                                                           |repeat code lead    | |
 //
 // ```
 //  data code lead = 9ms + 4.5ms
@@ -48,7 +48,7 @@ pub enum NecContent {
 
 pub trait NecReceiver<INSTANT, DURATION>
 where
-    DURATION: Copy + Ord + From<Duration<MicroSeconds>>,
+    DURATION: Copy + Ord + From<Duration<u32, MicroSeconds>>,
     INSTANT: Copy + core::ops::Sub<INSTANT, Output = DURATION>,
 {
     //type Result = nb::Result<NecContent, u32>;
@@ -76,7 +76,7 @@ enum NecState<INSTANT> {
 
 impl<INSTANT, DURATION> NecReceiver<INSTANT, DURATION> for IrReceiver<INSTANT>
 where
-    DURATION: Copy + Ord + From<Duration<MicroSeconds>>,
+    DURATION: Copy + Ord + From<Duration<u32, MicroSeconds>>,
     INSTANT: Copy + core::ops::Sub<INSTANT, Output = DURATION>,
 {
     fn receive<T>(&mut self, now: INSTANT, active: bool) -> nb::Result<NecContent, u32> {

@@ -21,22 +21,7 @@ use crate::hal::stm32f103xx;
 use crate::hal::time::*;
 use crate::rt::entry;
 use crate::rt::ExceptionFrame;
-use room_pill::{ir, ir::NecReceiver, rgb::*};
-
-#[derive(Copy, Clone)]
-struct Time {
-    now: hal::time::Instant,
-    freq: u32,
-}
-
-impl Time {
-    fn new(tick: &hal::time::MonoTimer) -> Time {
-        Time {
-            now: tick.now(),
-            freq: tick.frequency().0,
-        }
-    }
-}
+use room_pill::{ir, ir::NecReceiver, rgb::*, time::SysTicks};
 
 #[entry]
 fn main() -> ! {
@@ -65,14 +50,14 @@ fn main() -> ! {
     let mut flash = dp.FLASH.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
     let trace_enabled = enable_trace(cp.DCB);
-    let tick = MonoTimer::new(cp.DWT, trace_enabled, clocks);
+    let ticker = MonoTimer::new(cp.DWT, trace_enabled, clocks);
 
-    let mut receiver = ir::IrReceiver::<Time>::new(); // period = 0.5ms = 500us
+    let mut receiver = ir::IrReceiver::<room_pill::time::Time<u32, SysTicks>>::new(); // period = 0.5ms = 500us
 
     let mut color = Colors::White as u32;
 
     loop {
-        let t = Time::new(&tick);
+        let t = ticker.now();
         let ir_cmd = receiver.receive(t, ir_receiver.is_low());
 
         let c = match ir_cmd {

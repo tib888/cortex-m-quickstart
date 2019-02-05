@@ -4,7 +4,7 @@
 
 extern crate cortex_m;
 extern crate embedded_hal;
-//extern crate num_traits;
+extern crate num_traits;
 extern crate rtfm;
 extern crate stm32f103xx_hal;
 

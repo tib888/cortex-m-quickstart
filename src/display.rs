@@ -26,7 +26,7 @@ pub fn fmt_nn(n: u8) -> &'static [u8] {
     }
 }
 
-pub fn fmt_duration(duration: Duration<Seconds>) -> &'static [u8] {
+pub fn fmt_duration(duration: Duration<u32, Seconds>) -> &'static [u8] {
     let (_, min, sec) = duration.to_hms();
     static mut TEXT: [u8; 5] = [0u8; 5];
     unsafe {
