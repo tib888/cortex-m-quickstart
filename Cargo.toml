@@ -10,16 +10,16 @@ version = "0.3.1"
 edition = "2018"
 
 [dependencies]
-cortex-m = "0.5.8"
-cortex-m-rt = "0.6.7"
-cortex-m-semihosting = "0.3.2"
+cortex-m = "0.6.1"
+cortex-m-rt = "0.6.10"
+cortex-m-semihosting = "0.3.5"
 panic-halt = "0.2.0"
-typenum = "1.10.0"
-embedded-hal = "0.2.2"
-nb = "0.1.1"
+typenum = "1.11.2"
+embedded-hal = "0.2.3"
+nb = "0.1.2"
 
 [dependencies.num-traits]
-version = "0.2"
+version = "0.2.8"
 default-features = false
 
 # [dependencies.stm32f103xx-rtc]
@@ -32,7 +32,7 @@ version = "0.1.0"
 
 [dependencies.cortex-m-rtfm]
 features = ["timer-queue"]
-version="0.4.0"
+version="0.4.3"
 
 [dependencies.onewire]
 git = "https://github.com/tib888/onewire"

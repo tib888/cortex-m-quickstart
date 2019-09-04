@@ -58,7 +58,7 @@ fn main() -> ! {
 
     loop {
         let t = ticker.now();
-        let ir_cmd = receiver.receive(t, ir_receiver.is_low());
+        let ir_cmd = receiver.receive(&ticker, t, ir_receiver.is_low());
 
         let c = match ir_cmd {
             Ok(ir::NecContent::Repeat) => None,

@@ -1,7 +1,7 @@
 //! PT8211 16 bit stereo DAC (BCK, DIN, WS) on three output pins
 //! TDA1311A equivalent
 
-use embedded_hal::digital::OutputPin;
+use embedded_hal::digital::v1::OutputPin;
 //use num_traits::int::*;
 //use typenum::{U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U11, U12, U13, U14, U15, U16};
 

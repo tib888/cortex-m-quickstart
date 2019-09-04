@@ -1,6 +1,6 @@
 //! RGB led on 3 output pins
 
-use embedded_hal::digital::OutputPin;
+use embedded_hal::digital::v1::OutputPin;
 
 pub struct RgbLed<RPIN, GPIN, BPIN>
 where

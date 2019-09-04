@@ -1,5 +1,4 @@
-use embedded_hal::digital::InputPin;
-use embedded_hal::digital::{OutputPin, StatefulOutputPin};
+use embedded_hal::digital::v1::{InputPin, OutputPin, StatefulOutputPin};
 
 #[derive(Clone, Copy)]
 pub enum Mode {

@@ -1,5 +1,4 @@
-use embedded_hal::digital::OutputPin;
-use embedded_hal::digital::StatefulOutputPin;
+use embedded_hal::digital::v1::{OutputPin, StatefulOutputPin};
 
 pub trait Pump {
     fn start(&mut self);

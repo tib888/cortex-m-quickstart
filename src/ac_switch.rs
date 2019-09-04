@@ -3,7 +3,7 @@
 //! change to off
 
 use core::ops::Add;
-use embedded_hal::digital::InputPin;
+use embedded_hal::digital::v1::InputPin;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum OnOff {
