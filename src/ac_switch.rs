@@ -3,7 +3,7 @@
 //! change to off
 
 use core::ops::Add;
-use embedded_hal::digital::v1::InputPin;
+use embedded_hal::digital::v2::InputPin;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum OnOff {
@@ -39,10 +39,10 @@ where
     }
 
     /// this should be called regurarily; returns the state
-    pub fn update(&mut self, period: DURATION, delta: DURATION) {
+    pub fn update(&mut self, period: DURATION, delta: DURATION) -> Result<(), PIN::Error> {
         self.full_duration = self.full_duration + delta;
 
-        if self.pin.is_low() {
+        if self.pin.is_low()? {
             self.low_duration = self.low_duration + delta;
         }
 
@@ -57,6 +57,8 @@ where
             self.full_duration = DURATION::default();
             self.low_duration = DURATION::default();
         };
+
+        Ok(())
     }
 
     pub fn state(&self) -> Option<OnOff> {

@@ -1,4 +1,4 @@
-use embedded_hal::digital::v1::{InputPin, OutputPin, StatefulOutputPin};
+use embedded_hal::digital::v2::{InputPin, OutputPin, StatefulOutputPin};
 
 #[derive(Clone, Copy)]
 pub enum Mode {
@@ -97,11 +97,11 @@ impl State {
     }
 }
 
-pub struct Controller<SWPIN, RELAYPIN, MOVEPIN>
+pub struct Controller<SWPIN, RELAYPIN, MOVEPIN, ERROR>
 where
-    SWPIN: InputPin,
-    MOVEPIN: InputPin,
-    RELAYPIN: OutputPin,
+    SWPIN: InputPin<Error = ERROR>,
+    MOVEPIN: InputPin<Error = ERROR>,
+    RELAYPIN: OutputPin<Error = ERROR>,
 {
     switch: SWPIN,
     lamp: RELAYPIN,
@@ -113,57 +113,58 @@ where
     state: State,
 }
 
-impl<SWPIN, RELAYPIN, MOVEPIN> Controller<SWPIN, RELAYPIN, MOVEPIN>
+impl<SWPIN, RELAYPIN, MOVEPIN, ERROR> Controller<SWPIN, RELAYPIN, MOVEPIN, ERROR>
 where
-    SWPIN: InputPin,
-    MOVEPIN: InputPin,
-    RELAYPIN: OutputPin + StatefulOutputPin,
+    SWPIN: InputPin<Error = ERROR>,
+    MOVEPIN: InputPin<Error = ERROR>,
+    RELAYPIN: OutputPin<Error = ERROR> + StatefulOutputPin,
 {
-    pub fn new(switch: SWPIN, lamp: RELAYPIN, movement: MOVEPIN, mode: Mode) -> Self {
-        let lighting = lamp.is_set_high();
-        let switched = switch.is_high();
+    pub fn new(switch: SWPIN, lamp: RELAYPIN, movement: MOVEPIN, mode: Mode) -> Result<Self, ERROR> {
+        let lighting = lamp.is_set_high()?;
+        let switched = switch.is_high()?;
         let t = 0;
-        Controller {
+        Ok(Controller {
             switch,
             lamp,
             movement,
             movement_timeout: 2 * 60,
             manual_timeout: Some(30 * 60),
             state: State::new(mode, lighting, switched, t),
-        }
+        })
     }
 
-    pub fn update(&mut self, t: u32) {
+    pub fn update(&mut self, t: u32) -> Result<(), ERROR> {
         let on = self.state.update(
             0u32,
             self.movement_timeout,
             self.manual_timeout,
             t,
-            self.switch.is_high(),
-            self.movement.is_high(),
-            self.lamp.is_set_high(),
+            self.switch.is_high()?,
+            self.movement.is_high()?,
+            self.lamp.is_set_high()?,
         );
         if on {
             self.lamp.set_high()
         } else {
             self.lamp.set_low()
-        };
+        }
     }
 
     pub fn current_mode(&self) -> Mode {
         self.state.mode
     }
 
-    pub fn is_lighting(&self) -> bool {
+    pub fn is_lighting(&self) -> Result<bool, ERROR> {
         self.lamp.is_set_high()
     }
 
-    pub fn set_lighting(&mut self, on: bool, t: u32) {
-        let on = self.state.set(on, t, self.switch.is_high());
+    pub fn set_lighting(&mut self, on: bool, t: u32) -> Result<(), ERROR> {
+        let on = self.state.set(on, t, self.switch.is_high()?);
+
         if on {
             self.lamp.set_high()
         } else {
             self.lamp.set_low()
-        };
+        }
     }
 }

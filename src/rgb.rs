@@ -1,6 +1,6 @@
 //! RGB led on 3 output pins
 
-use embedded_hal::digital::v1::OutputPin;
+use embedded_hal::digital::v2::OutputPin;
 
 pub struct RgbLed<RPIN, GPIN, BPIN>
 where
@@ -25,44 +25,45 @@ pub enum Colors {
     White = 0xFFFFFF,
 }
 
-impl<RPIN, GPIN, BPIN> RgbLed<RPIN, GPIN, BPIN>
+impl<RPIN, GPIN, BPIN, ERROR> RgbLed<RPIN, GPIN, BPIN>
 where
-    RPIN: OutputPin,
-    GPIN: OutputPin,
-    BPIN: OutputPin,
+    RPIN: OutputPin<Error = ERROR>,
+    GPIN: OutputPin<Error = ERROR>,
+    BPIN: OutputPin<Error = ERROR>,
 {
     pub fn new(r: RPIN, g: GPIN, b: BPIN) -> Self {
         RgbLed { r, g, b }
     }
 
-    pub fn set(&mut self, r: bool, g: bool, b: bool) {
+    pub fn set(&mut self, r: bool, g: bool, b: bool) -> Result<(), ERROR> {
         if !r {
-            self.r.set_high();
+            self.r.set_high()?;
         } else {
-            self.r.set_low();
+            self.r.set_low()?;
         };
         if !g {
-            self.g.set_high();
+            self.g.set_high()?;
         } else {
-            self.g.set_low();
+            self.g.set_low()?;
         };
         if !b {
-            self.b.set_high();
+            self.b.set_high()?;
         } else {
-            self.b.set_low();
+            self.b.set_low()?;
         };
+        Ok(())
     }
 
-    pub fn color(&mut self, color: Colors) {
-        self.raw_color(color as u32);
+    pub fn color(&mut self, color: Colors) -> Result<(), ERROR> {
+        self.raw_color(color as u32)
     }
 
-    pub fn raw_color(&mut self, col: u32) {
+    pub fn raw_color(&mut self, col: u32) -> Result<(), ERROR> {
         let c = col as u32;
         self.set(
             (c & 0x000080) != 0,
             (c & 0x008000) != 0,
             (c & 0x800000) != 0,
-        );
+        )
     }
 }

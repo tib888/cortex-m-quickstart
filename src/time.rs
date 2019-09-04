@@ -6,7 +6,7 @@ use cortex_m::peripheral::DCB;
 use cortex_m::peripheral::DWT;
 //use num_traits::Num;
 use num_traits::*;
-use stm32f103xx_hal::rcc::Clocks;
+use stm32f1xx_hal::rcc::Clocks;
 
 /// Time unit marker, implies the tick frequency
 #[derive(Copy, Clone, Default)]

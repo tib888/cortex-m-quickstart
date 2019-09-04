@@ -38,9 +38,9 @@ extern crate nb;
 extern crate onewire;
 extern crate panic_halt;
 extern crate room_pill;
-extern crate stm32f103xx_hal as hal;
+extern crate stm32f1xx_hal as hal;
 
-use crate::hal::{delay::Delay, prelude::*, stm32f103xx, watchdog::IndependentWatchdog};
+use crate::hal::{delay::Delay, prelude::*, stm32f1xx, watchdog::IndependentWatchdog};
 use crate::rt::ExceptionFrame;
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use ir::NecReceiver;
@@ -123,7 +123,7 @@ impl Model {
 
 #[entry]
 fn main() -> ! {
-    let dp = stm32f103xx::Peripherals::take().unwrap();
+    let dp = stm32f1xx::Peripherals::take().unwrap();
 
     let mut watchdog = IndependentWatchdog::new(dp.IWDG);
     watchdog.start(2_000_000u32.us());

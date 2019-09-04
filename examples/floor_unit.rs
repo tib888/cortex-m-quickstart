@@ -38,11 +38,11 @@ extern crate nb;
 extern crate onewire;
 extern crate panic_halt;
 extern crate room_pill;
-extern crate stm32f103xx_hal as hal;
+extern crate stm32f1xx_hal as hal;
 
 use crate::hal::{
     afio::AfioExt, can::*, delay::Delay, flash::FlashExt, gpio::GpioExt, rcc::RccExt, rtc,
-    stm32f103xx, watchdog::IndependentWatchdog,
+    stm32f1xx, watchdog::IndependentWatchdog,
 };
 use crate::rt::ExceptionFrame;
 use core::marker::PhantomData;
@@ -1166,7 +1166,7 @@ impl<'a, 'b> Model<'a, 'b> {
 
 #[entry]
 fn main() -> ! {
-    let mut dp = stm32f103xx::Peripherals::take().unwrap();
+    let mut dp = stm32f1xx::Peripherals::take().unwrap();
 
     let mut watchdog = IndependentWatchdog::new(dp.IWDG);
     watchdog.start(hal::time::U32Ext::us(2_000_000u32));

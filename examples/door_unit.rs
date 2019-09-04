@@ -52,10 +52,10 @@ extern crate nb;
 extern crate onewire;
 extern crate panic_halt;
 extern crate room_pill;
-extern crate stm32f103xx_hal as hal;
+extern crate stm32f1xx_hal as hal;
 
 use crate::hal::{
-  can::*, delay::Delay, prelude::*, rtc, stm32f103xx, watchdog::IndependentWatchdog,
+  can::*, delay::Delay, prelude::*, rtc, stm32f1xx, watchdog::IndependentWatchdog,
 };
 use crate::rt::{entry, ExceptionFrame};
 use embedded_hal::{
@@ -81,7 +81,7 @@ fn main() -> ! {
 }
 
 fn door_unit_main() -> ! {
-  let dp = stm32f103xx::Peripherals::take().unwrap();
+  let dp = stm32f1xx::Peripherals::take().unwrap();
 
   let mut watchdog = IndependentWatchdog::new(dp.IWDG);
   watchdog.start(2_000_000u32.us());

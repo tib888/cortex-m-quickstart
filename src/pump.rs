@@ -1,14 +1,16 @@
-use embedded_hal::digital::v1::{OutputPin, StatefulOutputPin};
+use panic_halt as _;
+use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 
 pub trait Pump {
-    fn start(&mut self);
-    fn stop(&mut self);
+    type Error;
+    fn start(&mut self) -> Result<(), Self::Error>;
+    fn stop(&mut self) -> Result<(), Self::Error>;
 }
 
-pub trait StatefulPump: Pump {
-    fn started(&self) -> bool;
-    fn stopped(&self) -> bool {
-        !self.started()
+pub trait StatefulPump: Pump {    
+    fn started(&self) -> Result<bool, Self::Error>;
+    fn stopped(&self) -> Result<bool, Self::Error> {
+        self.started().map(|started| !started)
     }
 }
 
@@ -32,12 +34,14 @@ impl<PIN> Pump for PumpSSR<PIN>
 where
     PIN: OutputPin,
 {
-    fn start(&mut self) {
-        self.pin.set_low();
+    type Error = PIN::Error;
+
+    fn start(&mut self) -> Result<(), Self::Error> {
+        self.pin.set_low()
     }
 
-    fn stop(&mut self) {
-        self.pin.set_high();
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        self.pin.set_high()
     }
 }
 
@@ -45,7 +49,7 @@ impl<PIN> StatefulPump for PumpSSR<PIN>
 where
     PIN: OutputPin + StatefulOutputPin,
 {
-    fn started(&self) -> bool {
+    fn started(&self) -> Result<bool, Self::Error> {
         self.pin.is_set_low()
     }
 }

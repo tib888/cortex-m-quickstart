@@ -13,11 +13,11 @@ extern crate cortex_m_rt as rt;
 extern crate nb;
 extern crate onewire;
 extern crate panic_halt;
-extern crate stm32f103xx_hal as hal;
+extern crate stm32f1xx_hal as hal;
 
 use crate::hal::delay::Delay;
 use crate::hal::prelude::*;
-use crate::hal::stm32f103xx;
+use crate::hal::stm32f1xx;
 use crate::rt::entry;
 use crate::rt::ExceptionFrame;
 use crate::sh::hio;
@@ -31,7 +31,7 @@ fn main() -> ! {
     let mut hstdout = hio::hstdout().unwrap();
 
     let cp = cortex_m::Peripherals::take().unwrap();
-    let dp = stm32f103xx::Peripherals::take().unwrap();
+    let dp = stm32f1xx::Peripherals::take().unwrap();
 
     let mut flash = dp.FLASH.constrain();
 

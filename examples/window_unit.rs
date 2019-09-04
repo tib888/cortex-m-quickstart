@@ -49,25 +49,26 @@
 
 extern crate cortex_m;
 #[macro_use]
-extern crate cortex_m_rt as rt;
-extern crate cortex_m_semihosting as sh;
-extern crate embedded_hal;
-extern crate nb;
-extern crate onewire;
-extern crate panic_halt;
-extern crate room_pill;
-extern crate stm32f103xx_hal as hal;
+// extern crate cortex_m_rt as rt;
+// extern crate cortex_m_semihosting as sh;
+// extern crate embedded_hal;
+// extern crate nb;
+// extern crate onewire;
+// extern crate panic_halt;
+// extern crate room_pill;
+// //extern crate stm32f1;
+// extern crate stm32f1xx_hal;
 
-use crate::hal::{
-	can::*, delay::Delay, prelude::*, rtc, stm32f103xx, watchdog::IndependentWatchdog,
+use stm32f1xx_hal::{
+	pac, can::*, delay::Delay, prelude::*, rtc, watchdog::IndependentWatchdog,
 };
-use crate::rt::{entry, ExceptionFrame};
+use cortex_m_rt::{entry, ExceptionFrame};
 use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
 use onewire::*;
 use room_pill::{
 	ac_switch::*,
 	ir,
-	ir::NecReceiver,
+	//ir::NecReceiver,
 	ir_remote::*,
 	rgb::{Colors, RgbLed},
 	time::{Duration, Seconds, SysTicks, Ticker, Time},
@@ -81,7 +82,7 @@ fn main() -> ! {
 }
 
 fn window_unit_main() -> ! {
-	let dp = stm32f103xx::Peripherals::take().unwrap();
+	let dp = stm32f1xx_hal::pac::Peripherals::take().unwrap();
 
 	let mut watchdog = IndependentWatchdog::new(dp.IWDG);
 	watchdog.start(2_000_000u32.us());
@@ -103,8 +104,12 @@ fn window_unit_main() -> ! {
 		.freeze(&mut flash.acr);
 	watchdog.feed();
 
+	let mut pwr = dp.PWR;
+    
+    let mut backup_domain = rcc.bkp.constrain(dp.BKP, &mut rcc.apb1, &mut pwr);
+
 	// real time clock
-	let rtc = rtc::Rtc::new(dp.RTC, &mut rcc.apb1, &mut dp.PWR);
+	let rtc = rtc::Rtc::rtc(dp.RTC, &mut backup_domain);
 	watchdog.feed();
 
 	let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
@@ -149,7 +154,7 @@ fn window_unit_main() -> ! {
 	let cantx = gpioa.pa12.into_alternate_push_pull(&mut gpioa.crh);
 	// USB is needed here because it can not be used at the same time as CAN since they share memory:
 	let mut can = Can::can1(
-		dp.CAN,
+		dp.CAN1,
 		(cantx, canrx),
 		&mut afio.mapr,
 		&mut rcc.apb1,
@@ -269,12 +274,12 @@ fn window_unit_main() -> ! {
 	}
 }
 
-#[exception]
-fn HardFault(ef: &ExceptionFrame) -> ! {
-	panic!("HardFault at {:#?}", ef);
-}
+// #[exception]
+// fn HardFault(ef: &ExceptionFrame) -> ! {
+// 	panic!("HardFault at {:#?}", ef);
+// }
 
-#[exception]
-fn DefaultHandler(irqn: i16) {
-	panic!("Unhandled exception (IRQn = {})", irqn);
-}
+// #[exception]
+// fn DefaultHandler(irqn: i16) {
+// 	panic!("Unhandled exception (IRQn = {})", irqn);
+// }

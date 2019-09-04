@@ -12,10 +12,10 @@ extern crate embedded_hal;
 extern crate nb;
 extern crate panic_halt;
 extern crate room_pill;
-extern crate stm32f103xx_hal as hal;
+extern crate stm32f1xx_hal as hal;
 
 use crate::hal::prelude::*;
-use crate::hal::stm32f103xx;
+use crate::hal::stm32f1xx;
 use crate::rt::entry;
 use crate::rt::ExceptionFrame;
 use crate::sh::hio;
@@ -29,7 +29,7 @@ use room_pill::{
 #[entry]
 fn main() -> ! {
     let cp = cortex_m::Peripherals::take().unwrap();
-    let dp = stm32f103xx::Peripherals::take().unwrap();
+    let dp = stm32f1xx::Peripherals::take().unwrap();
 
     let mut rcc = dp.RCC.constrain();
     let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
