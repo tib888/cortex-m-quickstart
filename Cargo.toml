@@ -44,7 +44,7 @@ features = ["stm32f103", "rt"]
 
 [dependencies.onewire]
 git = "https://github.com/tib888/onewire"
-version = "0.4.1"
+version = "0.5.0"
 
 [dependencies.lcd-hal]
 git = "https://github.com/tib888/lcd-hal"

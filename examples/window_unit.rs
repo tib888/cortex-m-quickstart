@@ -60,10 +60,13 @@ extern crate cortex_m;
 // extern crate stm32f1xx_hal;
 
 use stm32f1xx_hal::{
-	pac, can::*, delay::Delay, prelude::*, rtc, watchdog::IndependentWatchdog,
+	can::*, delay::Delay, prelude::*, rtc, watchdog::IndependentWatchdog,
 };
-use cortex_m_rt::{entry, ExceptionFrame};
-use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
+use cortex_m_rt::entry;
+use embedded_hal::{ 
+	watchdog::{Watchdog, WatchdogEnable}, 
+	digital::v2::{InputPin, OutputPin},
+};
 use onewire::*;
 use room_pill::{
 	ac_switch::*,
@@ -71,7 +74,7 @@ use room_pill::{
 	//ir::NecReceiver,
 	ir_remote::*,
 	rgb::{Colors, RgbLed},
-	time::{Duration, Seconds, SysTicks, Ticker, Time},
+	time::{Duration, SysTicks, Ticker, Time, TimeSource},
 };
 //use sh::hio;
 //use core::fmt::Write;
@@ -85,7 +88,7 @@ fn window_unit_main() -> ! {
 	let dp = stm32f1xx_hal::pac::Peripherals::take().unwrap();
 
 	let mut watchdog = IndependentWatchdog::new(dp.IWDG);
-	watchdog.start(2_000_000u32.us());
+	watchdog.start(2_000u32.ms());
 
 	let mut flash = dp.FLASH.constrain();
 
@@ -113,11 +116,14 @@ fn window_unit_main() -> ! {
 	watchdog.feed();
 
 	let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
-	// Disables the JTAG to free up pb3, pb4 and pa15 for normal use
-	afio.mapr.disable_jtag();
-
+	
 	//configure pins:
 	let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
+	let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
+	let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
+
+	// Disables the JTAG to free up pb3, pb4 and pa15 for normal use
+	let (pa15, pb3, pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
 
 	// Radiator valve motor sense on A0, A1 (floating or pull down input)
 	let _valve_sense_a = gpioa.pa0.into_floating_input(&mut gpioa.crl);
@@ -162,9 +168,7 @@ fn window_unit_main() -> ! {
 	);
 
 	// Read the NEC IR remote commands on A15 GPIO as input with internal pullup
-	let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
-
-	let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
+	let ir_receiver = pa15.into_pull_up_input(&mut gpioa.crh);
 
 	// Photoresistor on B0 (ADC8)
 	let photoresistor = gpiob.pb0.into_floating_input(&mut gpiob.crl);
@@ -173,10 +177,10 @@ fn window_unit_main() -> ! {
 	let ac_main_voltage = gpiob.pb1.into_floating_input(&mut gpiob.crl);
 
 	// B3 not used, connected to the ground
-	let _b3 = gpiob.pb3.into_pull_down_input(&mut gpiob.crl);
+	let _b3 = pb3.into_pull_down_input(&mut gpiob.crl);
 
 	// DS18B20 1-wire temperature sensors connected to B4 GPIO
-	let mut onewire_io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
+	let mut onewire_io = pb4.into_open_drain_output(&mut gpiob.crl);
 
 	// B5 not used, connected to the ground
 	let _b5 = gpiob.pb5.into_pull_down_input(&mut gpiob.crl);
@@ -202,8 +206,6 @@ fn window_unit_main() -> ! {
 	);
 	rgb.color(Colors::Black);
 
-	let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
-
 	// C13 on board LED^
 	let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
@@ -218,19 +220,20 @@ fn window_unit_main() -> ! {
 	let mut delay = Delay::new(cp.SYST, clocks);
 	let mut one_wire = OneWirePort::new(onewire_io, delay);
 
-	let ticker = Ticker::new(cp.DWT, cp.DCB, clocks);
+	let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 	let mut receiver = ir::IrReceiver::<Time<u32, SysTicks>>::new();
 
-	let mut last_time = ticker.now();
+    let ac_period = tick.from_ms(20.ms());
+	let one_sec = tick.from_s(1.s());
 
-	let ac_period = Duration::<SysTicks>::from(20.ms());
+	let mut last_time = tick.now();
 
 	//main update loop
 	loop {
 		watchdog.feed();
 
 		//update the IR receiver statemachine:
-		let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
+		let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low().unwrap_void());
 
 		match ir_cmd {
 			Ok(ir::NecContent::Repeat) => {}
@@ -244,7 +247,8 @@ fn window_unit_main() -> ! {
 		}
 
 		// calculate the time since last execution:
-		let delta = tick.now() - last_time;
+		let now = tick.now();
+		let delta = now - last_time;
 
 		switch_roll_up.update(ac_period, delta);
 		switch_roll_down.update(ac_period, delta);
@@ -266,11 +270,13 @@ fn window_unit_main() -> ! {
 		};
 
 		// do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
-		if delta < 1u32.s() {
+		if delta < one_sec {
 			continue;
 		}
 
 		led.toggle();
+
+		last_time = now;
 	}
 }
 
