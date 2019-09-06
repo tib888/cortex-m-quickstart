@@ -47,20 +47,26 @@
 #![no_main]
 #![no_std]
 
-extern crate cortex_m;
-#[macro_use]
-// extern crate cortex_m_rt as rt;
-// extern crate cortex_m_semihosting as sh;
-// extern crate embedded_hal;
-// extern crate nb;
-// extern crate onewire;
-// extern crate panic_halt;
-// extern crate room_pill;
-// //extern crate stm32f1;
-// extern crate stm32f1xx_hal;
+use cortex_m;
 
+#[macro_use]
+
+//use panic_halt;
+
+use room_pill::{
+	ac_switch::*,
+	ir,
+	ir::NecReceiver,
+	ir_remote::*,
+	rgb::{Colors, RgbLed},
+	time::{SysTicks, Ticker, Time, TimeSource, U32Ext},
+};
 use stm32f1xx_hal::{
-	can::*, delay::Delay, prelude::*, rtc, watchdog::IndependentWatchdog,
+	//can::*, 
+	delay::Delay, 
+	prelude::*, 
+	rtc, 
+	watchdog::IndependentWatchdog,
 };
 use cortex_m_rt::entry;
 use embedded_hal::{ 
@@ -68,16 +74,7 @@ use embedded_hal::{
 	digital::v2::{InputPin, OutputPin},
 };
 use onewire::*;
-use room_pill::{
-	ac_switch::*,
-	ir,
-	//ir::NecReceiver,
-	ir_remote::*,
-	rgb::{Colors, RgbLed},
-	time::{Duration, SysTicks, Ticker, Time, TimeSource},
-};
-//use sh::hio;
-//use core::fmt::Write;
+
 
 #[entry]
 fn main() -> ! {
@@ -88,7 +85,7 @@ fn window_unit_main() -> ! {
 	let dp = stm32f1xx_hal::pac::Peripherals::take().unwrap();
 
 	let mut watchdog = IndependentWatchdog::new(dp.IWDG);
-	watchdog.start(2_000u32.ms());
+	watchdog.start(stm32f1xx_hal::time::U32Ext::ms(2_000u32));
 
 	let mut flash = dp.FLASH.constrain();
 
@@ -158,14 +155,14 @@ fn window_unit_main() -> ! {
 	// CAN (RX, TX) on A11, A12
 	let canrx = gpioa.pa11.into_floating_input(&mut gpioa.crh);
 	let cantx = gpioa.pa12.into_alternate_push_pull(&mut gpioa.crh);
-	// USB is needed here because it can not be used at the same time as CAN since they share memory:
-	let mut can = Can::can1(
-		dp.CAN1,
-		(cantx, canrx),
-		&mut afio.mapr,
-		&mut rcc.apb1,
-		dp.USB,
-	);
+	// USB is needed here because it can not be used at the same time as CAN since they share memory:	
+	// let mut can = Can::can1(
+	// 	dp.CAN1,
+	// 	(cantx, canrx),
+	// 	&mut afio.mapr,
+	// 	&mut rcc.apb1,
+	// 	dp.USB,
+	// );
 
 	// Read the NEC IR remote commands on A15 GPIO as input with internal pullup
 	let ir_receiver = pa15.into_pull_up_input(&mut gpioa.crh);
@@ -223,8 +220,8 @@ fn window_unit_main() -> ! {
 	let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
 	let mut receiver = ir::IrReceiver::<Time<u32, SysTicks>>::new();
 
-    let ac_period = tick.from_ms(20.ms());
-	let one_sec = tick.from_s(1.s());
+    let ac_period = tick.from_ms(room_pill::time::U32Ext::ms(20u32));
+	let one_sec = tick.from_s(1u32.s());
 
 	let mut last_time = tick.now();
 
@@ -232,8 +229,13 @@ fn window_unit_main() -> ! {
 	loop {
 		watchdog.feed();
 
-		//update the IR receiver statemachine:
-		let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low().unwrap_void());
+		// calculate the time since last execution:
+		let now = tick.now();
+		let delta = now - last_time;
+		last_time = now;
+
+		//update the IR receiver statemachine:		
+		let ir_cmd = receiver.receive(now, ir_receiver.is_low().unwrap());
 
 		match ir_cmd {
 			Ok(ir::NecContent::Repeat) => {}
@@ -244,12 +246,8 @@ fn window_unit_main() -> ! {
 				//model.refresh_display(&mut display, &mut backlight);
 			}
 			_ => {}
-		}
-
-		// calculate the time since last execution:
-		let now = tick.now();
-		let delta = now - last_time;
-
+		};
+		
 		switch_roll_up.update(ac_period, delta);
 		switch_roll_down.update(ac_period, delta);
 
@@ -275,8 +273,6 @@ fn window_unit_main() -> ! {
 		}
 
 		led.toggle();
-
-		last_time = now;
 	}
 }
 

@@ -43,21 +43,21 @@
 #![no_main]
 #![no_std]
 
-extern crate cortex_m;
 #[macro_use]
-extern crate cortex_m_rt as rt;
-extern crate cortex_m_semihosting as sh;
-extern crate embedded_hal;
-extern crate nb;
-extern crate onewire;
-extern crate panic_halt;
-extern crate room_pill;
-extern crate stm32f1xx_hal as hal;
+use cortex_m;
+use cortex_m_semihosting;
+use cortex_m_rt::entry;
 
-use crate::hal::{
-  can::*, delay::Delay, prelude::*, rtc, stm32f1xx, watchdog::IndependentWatchdog,
+use nb;
+use onewire;
+use panic_halt;
+use room_pill;
+
+use stm32f1xx_hal::{
+  //can::*, 
+  delay::Delay, prelude::*, rtc, watchdog::IndependentWatchdog,
 };
-use crate::rt::{entry, ExceptionFrame};
+
 use embedded_hal::{
   digital::InputPin,
   watchdog::{Watchdog, WatchdogEnable},
@@ -69,7 +69,7 @@ use room_pill::{
   ir,
   ir_remote::*,
   rgb::{Colors, RgbLed},
-  time::{Duration, Ticker, Time},
+  time::{SysTicks, Ticker, Time, TimeSource, U32Ext},
 };
 
 //use sh::hio;
@@ -144,13 +144,13 @@ fn door_unit_main() -> ! {
   let canrx = gpioa.pa11.into_floating_input(&mut gpioa.crh);
   let cantx = gpioa.pa12.into_alternate_push_pull(&mut gpioa.crh);
   // USB is needed here because it can not be used at the same time as CAN since they share memory:
-  let mut can = Can::can1(
-    dp.CAN,
-    (cantx, canrx),
-    &mut afio.mapr,
-    &mut rcc.apb1,
-    dp.USB,
-  );
+  // let mut can = Can::can1(
+  //   dp.CAN,
+  //   (cantx, canrx),
+  //   &mut afio.mapr,
+  //   &mut rcc.apb1,
+  //   dp.USB,
+  // );
 
   // Read the NEC IR remote commands on A15 GPIO as input with internal pullup
   let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
@@ -210,18 +210,22 @@ fn door_unit_main() -> ! {
   let mut one_wire = OneWirePort::new(onewire_io, delay);
 
   let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
-  let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
-
-  let mut last_time = tick.now();
+  let mut receiver = ir::IrReceiver::<Time<u32, SysTicks>>::new();
 
   let ac_period = Duration::<Ticks>::from_ms(room_pill::time::U32Ext::ms(20), tick.frequency); //50Hz
+  let mut last_time = tick.now();
 
   //main update loop
   loop {
     watchdog.feed();
 
+    // calculate the time since last execution:
+    let now = tick.now();
+    let delta = now - last_time;
+    last_time = now;
+
     //update the IR receiver statemachine:
-    let ir_cmd = receiver.receive(tick.now(), ir_receiver.is_low());
+    let ir_cmd = receiver.receive(now, ir_receiver.is_low().unwrap());
 
     match ir_cmd {
       Ok(ir::NecContent::Repeat) => {}
@@ -233,9 +237,6 @@ fn door_unit_main() -> ! {
       }
       _ => {}
     }
-
-    // calculate the time since last execution:
-    let delta = tick.now() - last_time;
 
     switch_a.update(ac_period, delta);
     switch_b.update(ac_period, delta);
@@ -263,12 +264,12 @@ fn door_unit_main() -> ! {
   }
 }
 
-#[exception]
-fn HardFault(ef: &ExceptionFrame) -> ! {
-  panic!("HardFault at {:#?}", ef);
-}
+// #[exception]
+// fn HardFault(ef: &ExceptionFrame) -> ! {
+//   panic!("HardFault at {:#?}", ef);
+// }
 
-#[exception]
-fn DefaultHandler(irqn: i16) {
-  panic!("Unhandled exception (IRQn = {})", irqn);
-}
+// #[exception]
+// fn DefaultHandler(irqn: i16) {
+//   panic!("Unhandled exception (IRQn = {})", irqn);
+// }
