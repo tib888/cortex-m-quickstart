@@ -1,11 +1,9 @@
 use core::cmp::Ordering;
+use core::ops::{Add, Sub};
+use core::convert::From;
+use num_traits::{Num, WrappingSub, WrappingAdd};
 use core::marker::PhantomData;
-use core::ops::Add;
-use core::ops::Sub;
-use cortex_m::peripheral::DCB;
-use cortex_m::peripheral::DWT;
-//use num_traits::Num;
-use num_traits::*;
+use cortex_m::peripheral::{DCB, DWT};
 use stm32f1xx_hal::rcc::Clocks;
 
 /// Time unit marker, implies the tick frequency
@@ -23,6 +21,10 @@ pub struct MilliSeconds;
 /// Time unit marker
 #[derive(Copy, Clone, Default)]
 pub struct MicroSeconds;
+
+/// Time unit marker
+#[derive(Copy, Clone, Default)]
+pub struct NanoSeconds;
 
 #[derive(Copy, Clone)]
 pub struct Duration<T, UNIT>
@@ -46,11 +48,7 @@ pub trait TimeSource<T, UNIT>
 where
     T: Ord,
 {
-    fn now(&self) -> Time<T, UNIT>;
-    fn from_s(&self, duration: Duration<T, Seconds>) -> Duration<T, UNIT>;
-    fn from_ms(&self, duration: Duration<T, MilliSeconds>) -> Duration<T, UNIT>;
-    fn from_us(&self, duration: Duration<T, MicroSeconds>) -> Duration<T, UNIT>;
-    //fn ellapsed_between(now: Time<T, UNIT>, past: Time<T, UNIT>) -> Duration<T, UNIT>;
+    fn now(&self) -> Time<T, UNIT>;    
 }
 
 impl<T, UNIT> PartialEq for Time<T, UNIT>
@@ -71,10 +69,13 @@ where
     }
 }
 
-impl Time<u32, Seconds> where {
-    pub fn from_dhms(days: u32, hours: u32, minutes: u32, seconds: u32) -> Time<u32, Seconds> {
-        Time::<u32, Seconds> {
-            instant: days * (24 * 3600) + hours * 3600 + minutes * 60 + seconds,
+impl<T> Time<T, Seconds> 
+where 
+    T: Num + Ord + From<u32>,
+{
+    pub fn from_dhms(days: T, hours: T, minutes: T, seconds: T) -> Time<T, Seconds> {
+        Time::<T, Seconds> {
+            instant: days * T::from(24u32 * 3600u32) + hours * T::from(3600u32) + minutes * T::from(60u32) + seconds,
             unit: PhantomData::<Seconds>,
         }
     }
@@ -89,21 +90,42 @@ impl<UNIT> From<u32> for Duration<u32, UNIT> {
     }
 }
 
-impl Duration<u32, Seconds> {
-    pub fn from_hms(hours: u32, minutes: u32, seconds: u32) -> Duration<u32, Seconds> {
-        Duration::<u32, Seconds> {
-            count: hours * 3600 + minutes * 60 + seconds,
+impl<UNIT> From<u64> for Duration<u64, UNIT> {
+    fn from(count: u64) -> Duration<u64, UNIT> {
+        Duration::<u64, UNIT> {
+            count: count,
+            unit: PhantomData::<UNIT>,
+        }
+    }
+}
+
+impl<UNIT> From<Duration<u64, UNIT>> for Duration<u32, UNIT> {
+    fn from(duration: Duration<u64, UNIT>) -> Duration<u32, UNIT> {
+        Duration::<u32, UNIT> {
+            count: duration.count as u32,
+            unit: PhantomData::<UNIT>,
+        }
+    }
+}
+
+impl<T> Duration<T, Seconds> 
+where 
+    T: Num + Ord + From<u32> + Copy,
+{
+    pub fn from_hms(hours: T, minutes: T, seconds: T) -> Duration<T, Seconds> {
+        Duration::<T, Seconds> {
+            count: hours * T::from(3600u32) + minutes * T::from(60u32) + seconds,
             unit: PhantomData::<Seconds>,
         }
     }
 
-    pub fn to_hms(&self) -> (u32, u8, u8) {
+    pub fn to_hms(&self) -> (T, T, T) {
         let t = self.count;
-        let hour = t / 3600;
-        let t = t - hour * 3600;
-        let min = t / 60;
-        let sec = t - min * 60;
-        (hour, min as u8, sec as u8)
+        let hour = t / T::from(3600u32);
+        let t = t - hour * T::from(3600u32);
+        let min = t / T::from(60u32);
+        let sec = t - min * T::from(60u32);
+        (hour, min, sec)
     }
 }
 
@@ -213,18 +235,24 @@ where
     }
 }
 
-pub trait U32Ext {
+pub trait TimeExt<T> 
+where 
+    T: Ord 
+{
     /// Wrap in `Seconds`
-    fn s(self) -> Duration<u32, Seconds>;
+    fn s(self) -> Duration<T, Seconds>;
 
     /// Wrap in `Milliseconds`
-    fn ms(self) -> Duration<u32, MilliSeconds>;
+    fn ms(self) -> Duration<T, MilliSeconds>;
 
     /// Wrap in `Microseconds`
-    fn us(self) -> Duration<u32, MicroSeconds>;
+    fn us(self) -> Duration<T, MicroSeconds>;
+
+    /// Wrap in `Nanoseconds`
+    fn ns(self) -> Duration<T, NanoSeconds>;
 }
 
-impl U32Ext for u32 {
+impl TimeExt<u32> for u32 {
     fn s(self) -> Duration<u32, Seconds> {
         Duration::<u32, Seconds>::from(self)
     }
@@ -235,6 +263,28 @@ impl U32Ext for u32 {
 
     fn us(self) -> Duration<u32, MicroSeconds> {
         Duration::<u32, MicroSeconds>::from(self)
+    }
+
+    fn ns(self) -> Duration<u32, NanoSeconds> {
+        Duration::<u32, NanoSeconds>::from(self)
+    }
+}
+
+impl TimeExt<u64> for u64 {
+    fn s(self) -> Duration<u64, Seconds> {
+        Duration::<u64, Seconds>::from(self)
+    }
+
+    fn ms(self) -> Duration<u64, MilliSeconds> {
+        Duration::<u64, MilliSeconds>::from(self)
+    }
+
+    fn us(self) -> Duration<u64, MicroSeconds> {
+        Duration::<u64, MicroSeconds>::from(self)
+    }
+
+    fn ns(self) -> Duration<u64, NanoSeconds> {
+        Duration::<u64, NanoSeconds>::from(self)
     }
 }
 
@@ -281,8 +331,8 @@ impl From<WeekTime> for Time<u32, Seconds> {
 }
 
 pub struct Ticker {
-    pub frequency: u32, // herz
-                        //to_us: u32,         // frequency / 1_000_000
+    pub frequency: u32, // in Hz
+    pub period_x: u64, // in 2^19 period in us (7282 in case of 72Mhz)
 }
 
 impl Ticker {
@@ -293,38 +343,20 @@ impl Ticker {
         // now the CYCCNT counter can't be stopped or resetted
         drop(dwt);
 
+        let clk = clocks.sysclk().0 as u64;
+
         Ticker {
             frequency: clocks.sysclk().0,
+            period_x: (((1u64 << 19) * 1_000_000u64) + (clk >> 1)) / clk,
         }
     }
 }
 
-impl TimeSource<u32, SysTicks> for Ticker {
-    fn now(&self) -> Time<u32, SysTicks> {
-        Time::<u32, SysTicks> {
-            instant: DWT::get_cycle_count(),
-            unit: PhantomData::<SysTicks>,
-        }
-    }
-
-    fn from_s(&self, duration: Duration<u32, Seconds>) -> Duration<u32, SysTicks> {
-        Duration::<u32, SysTicks> {
-            count: duration.count * self.frequency,
-            unit: PhantomData::<SysTicks>,
-        }
-    }
-
-    fn from_ms(&self, duration: Duration<u32, MilliSeconds>) -> Duration<u32, SysTicks> {
-        Duration::<u32, SysTicks> {
-            count: duration.count * (self.frequency / 1_000),
-            unit: PhantomData::<SysTicks>,
-        }
-    }
-
-    fn from_us(&self, duration: Duration<u32, MicroSeconds>) -> Duration<u32, SysTicks> {
-        Duration::<u32, SysTicks> {
-            count: duration.count * (self.frequency / 1_000_000),
-            unit: PhantomData::<SysTicks>,
+impl TimeSource<u64, MicroSeconds> for Ticker {
+    fn now(&self) -> Time<u64, MicroSeconds> {
+        Time::<u64, MicroSeconds> {
+            instant: (DWT::get_cycle_count() as u64 * self.period_x) >> 19, 
+            unit: PhantomData::<MicroSeconds>,
         }
     }
 }

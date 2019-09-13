@@ -8,3 +8,4 @@ run*.bat
 stlink-v2.cfg
 stm32f1x.cfg
 .gdbinit
+.vscode/

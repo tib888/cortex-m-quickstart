@@ -18,7 +18,7 @@ pub mod light_control;
 pub mod menu;
 pub mod pump;
 pub mod rgb;
-pub mod time;
+pub mod timing;
 pub mod valve;
 
 // #[cfg(test)]
