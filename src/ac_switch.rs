@@ -1,5 +1,5 @@
 //! Switched AC mains optically decopuled and pull down the input pin with internal pullup
-//! if there is no low pulse on the input for ore than one AC period, the state should
+//! if there is no low pulse on the input for more than one AC period, the state should
 //! change to off
 
 use core::ops::Add;
