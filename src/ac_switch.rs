@@ -17,6 +17,7 @@ where
     DURATION: Default + PartialOrd + Add,
 {
     pin: PIN,
+    period: DURATION,
     full_duration: DURATION,
     low_duration: DURATION,
     last: Option<OnOff>,
@@ -28,9 +29,10 @@ where
     PIN: InputPin,
     DURATION: Default + PartialOrd + PartialEq + Add<DURATION, Output = DURATION> + Copy,
 {
-    pub fn new(pin: PIN) -> AcSwitch<PIN, DURATION> {
+    pub fn new(pin: PIN, period: DURATION) -> AcSwitch<PIN, DURATION> {
         AcSwitch {
             pin: pin,
+            period: period,
             full_duration: DURATION::default(),
             low_duration: DURATION::default(),
             last: Option::None,
@@ -38,15 +40,15 @@ where
         }
     }
 
-    /// this should be called regurarily; returns the state
-    pub fn update(&mut self, period: DURATION, delta: DURATION) -> Result<(), PIN::Error> {
+    /// this should be called regurarily
+    pub fn update(&mut self, delta: DURATION) -> Result<(), PIN::Error> {
         self.full_duration = self.full_duration + delta;
 
         if self.pin.is_low()? {
             self.low_duration = self.low_duration + delta;
         }
 
-        if self.full_duration >= period {
+        if self.full_duration >= self.period {
             self.last = self.current;
             self.current = Some(if self.low_duration == DURATION::default() {
                 OnOff::Off

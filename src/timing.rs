@@ -1,9 +1,9 @@
 use core::cmp::Ordering;
-use core::ops::{Add, Sub};
 use core::convert::From;
-use num_traits::{Num, WrappingSub, WrappingAdd};
 use core::marker::PhantomData;
+use core::ops::{Add, Div, Mul, Sub};
 use cortex_m::peripheral::{DCB, DWT};
+use num_traits::{Num, WrappingAdd, WrappingSub};
 use stm32f1xx_hal::rcc::Clocks;
 
 /// Time unit marker, implies the tick frequency
@@ -44,13 +44,6 @@ where
     unit: PhantomData<UNIT>,
 }
 
-pub trait TimeSource<T, UNIT>
-where
-    T: Ord,
-{
-    fn now(&self) -> Time<T, UNIT>;    
-}
-
 impl<T, UNIT> PartialEq for Time<T, UNIT>
 where
     T: Ord,
@@ -69,13 +62,16 @@ where
     }
 }
 
-impl<T> Time<T, Seconds> 
-where 
+impl<T> Time<T, Seconds>
+where
     T: Num + Ord + From<u32>,
 {
     pub fn from_dhms(days: T, hours: T, minutes: T, seconds: T) -> Time<T, Seconds> {
         Time::<T, Seconds> {
-            instant: days * T::from(24u32 * 3600u32) + hours * T::from(3600u32) + minutes * T::from(60u32) + seconds,
+            instant: days * T::from(24u32 * 3600u32)
+                + hours * T::from(3600u32)
+                + minutes * T::from(60u32)
+                + seconds,
             unit: PhantomData::<Seconds>,
         }
     }
@@ -99,6 +95,18 @@ impl<UNIT> From<u64> for Duration<u64, UNIT> {
     }
 }
 
+impl<UNIT> From<Duration<u32, UNIT>> for u32 {
+    fn from(duration: Duration<u32, UNIT>) -> u32 {
+        duration.count
+    }
+}
+
+impl<UNIT> From<Duration<u64, UNIT>> for u64 {
+    fn from(duration: Duration<u64, UNIT>) -> u64 {
+        duration.count
+    }
+}
+
 impl<UNIT> From<Duration<u64, UNIT>> for Duration<u32, UNIT> {
     fn from(duration: Duration<u64, UNIT>) -> Duration<u32, UNIT> {
         Duration::<u32, UNIT> {
@@ -108,8 +116,8 @@ impl<UNIT> From<Duration<u64, UNIT>> for Duration<u32, UNIT> {
     }
 }
 
-impl<T> Duration<T, Seconds> 
-where 
+impl<T> Duration<T, Seconds>
+where
     T: Num + Ord + From<u32> + Copy,
 {
     pub fn from_hms(hours: T, minutes: T, seconds: T) -> Duration<T, Seconds> {
@@ -196,6 +204,42 @@ where
     }
 }
 
+impl<T, UNIT> Mul<T> for Duration<T, UNIT>
+where
+    T: Mul<Output = T> + Ord,
+{
+    type Output = Self;
+    fn mul(self, rhs: T) -> Self::Output {
+        Self::Output {
+            count: self.count * rhs,
+            unit: PhantomData::<UNIT>,
+        }
+    }
+}
+
+impl<T, UNIT> Div for Duration<T, UNIT>
+where
+    T: Div<Output = T> + Ord,
+{
+    type Output = T;
+    fn div(self, rhs: Self) -> Self::Output {
+        self.count / rhs.count
+    }
+}
+
+impl<T, UNIT> Div<T> for Duration<T, UNIT>
+where
+    T: Div<Output = T> + Ord,
+{
+    type Output = Self;
+    fn div(self, rhs: T) -> Self::Output {
+        Self::Output {
+            count: self.count / rhs,
+            unit: PhantomData::<UNIT>,
+        }
+    }
+}
+
 impl<T, UNIT> Sub for Time<T, UNIT>
 where
     T: WrappingSub + Ord,
@@ -235,9 +279,9 @@ where
     }
 }
 
-pub trait TimeExt<T> 
-where 
-    T: Ord 
+pub trait TimeExt<T>
+where
+    T: Ord,
 {
     /// Wrap in `Seconds`
     fn s(self) -> Duration<T, Seconds>;
@@ -332,7 +376,7 @@ impl From<WeekTime> for Time<u32, Seconds> {
 
 pub struct Ticker {
     pub frequency: u32, // in Hz
-    pub period_x: u64, // in 2^19 period in us (7282 in case of 72Mhz)
+    pub period_x: u32,  // in 2^19 period in us (7282 in case of 72Mhz)
 }
 
 impl Ticker {
@@ -347,15 +391,21 @@ impl Ticker {
 
         Ticker {
             frequency: clocks.sysclk().0,
-            period_x: (((1u64 << 19) * 1_000_000u64) + (clk >> 1)) / clk,
+            period_x: ((((1u64 << 19) * 1_000_000u64) + (clk >> 1)) / clk) as u32,
         }
     }
-}
 
-impl TimeSource<u64, MicroSeconds> for Ticker {
-    fn now(&self) -> Time<u64, MicroSeconds> {
-        Time::<u64, MicroSeconds> {
-            instant: (DWT::get_cycle_count() as u64 * self.period_x) >> 19, 
+    pub fn now(&self) -> Time<u32, SysTicks> {
+        Time::<u32, SysTicks> {
+            instant: DWT::get_cycle_count(), 
+            unit: PhantomData::<SysTicks>,
+        }
+    }
+
+    pub fn to_us(&self, duration: Duration<u32, SysTicks>) -> Duration<u32, MicroSeconds>
+    {
+        Duration {
+            count: ((duration.count as u64 * self.period_x as u64) >> 19) as u32,
             unit: PhantomData::<MicroSeconds>,
         }
     }

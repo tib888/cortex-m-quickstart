@@ -79,7 +79,7 @@ impl State {
                     (t <= self.last_turn_on_time + timeout)
                         && (current_switch ^ self.switch_lamp_inconsistency)
                 } else {
-                    (current_switch ^ self.switch_lamp_inconsistency)
+                    current_switch ^ self.switch_lamp_inconsistency
                 }
             }
 
@@ -119,7 +119,12 @@ where
     MOVEPIN: InputPin<Error = ERROR>,
     RELAYPIN: OutputPin<Error = ERROR> + StatefulOutputPin,
 {
-    pub fn new(switch: SWPIN, lamp: RELAYPIN, movement: MOVEPIN, mode: Mode) -> Result<Self, ERROR> {
+    pub fn new(
+        switch: SWPIN,
+        lamp: RELAYPIN,
+        movement: MOVEPIN,
+        mode: Mode,
+    ) -> Result<Self, ERROR> {
         let lighting = lamp.is_set_high()?;
         let switched = switch.is_high()?;
         let t = 0;

@@ -2,6 +2,7 @@
 //#![deny(warnings)]
 #![no_std]
 
+pub mod ac_sense;
 pub mod ac_switch;
 pub mod dac;
 pub mod display;
@@ -12,6 +13,7 @@ pub mod light_control;
 pub mod menu;
 pub mod pump;
 pub mod rgb;
+pub mod roll;
 pub mod timing;
 pub mod valve;
 

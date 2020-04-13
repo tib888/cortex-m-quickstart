@@ -20,13 +20,13 @@
 
 use crate::timing::{Duration, MicroSeconds, Time, TimeExt};
 
-pub struct IrReceiver {
-    nec_state: NecState,
+pub struct IrReceiver<TIME> {
+    nec_state: NecState<TIME>,
 }
 
-impl IrReceiver {
+impl<TIME> IrReceiver<TIME> {
     /// Initiates the state of the NEC protocol receiver
-    pub fn new() -> IrReceiver {
+    pub fn new() -> IrReceiver<TIME> {
         IrReceiver {
             nec_state: NecState::ExpectInactive,
         }
@@ -45,7 +45,7 @@ pub enum NecContent {
     Repeat,
 }
 
-pub trait NecReceiver {
+pub trait NecReceiver<TIME> {
     //type Result = nb::Result<NecContent, u32>;
     /// This must be called ASAP after the level of the IR receiver changed
     ///
@@ -56,28 +56,37 @@ pub trait NecReceiver {
     ///
     /// *Note*: Due to the nonblocking implementation this can be polled arbitrary times
     /// with the correct parameters, not only at IR receiver level changes    
-    fn receive(
+    fn receive<F>(
         &mut self,
-        now: Time<u64, MicroSeconds>,
+        now: TIME,
         active: bool,
-    ) -> nb::Result<NecContent, u32>;
+        us_between: F
+    ) -> nb::Result<NecContent, u32> 
+    where 
+    F : Fn(TIME, TIME) -> Duration<u32, MicroSeconds>, 
+    TIME: Copy;
 }
 
-enum NecState {
+enum NecState<TIME> {
     ExpectInactive,
     ExpectLeadingActive,
-    ExpectLeadingActiveFinish(Time<u64, MicroSeconds>), //t0
-    ExpectLeadingPulseFinish(Time<u64, MicroSeconds>),  //t0
-    ExpectDataActiveFinish((Time<u64, MicroSeconds>, u32, u32)), //t0, index, data
-    ExpectDataPulseFinish((Time<u64, MicroSeconds>, u32, u32)), //t0, index, data
+    ExpectLeadingActiveFinish(TIME), //t0
+    ExpectLeadingPulseFinish(TIME),  //t0
+    ExpectDataActiveFinish((TIME, u32, u32)), //t0, index, data
+    ExpectDataPulseFinish((TIME, u32, u32)), //t0, index, data
 }
 
-impl NecReceiver for IrReceiver {
-    fn receive(
+impl<TIME> NecReceiver<TIME> for IrReceiver<TIME> {
+    fn receive<F>(
         &mut self,
-        now: Time<u64, MicroSeconds>,
+        now: TIME,
         active: bool,
-    ) -> nb::Result<NecContent, u32> {
+        us_between: F
+    ) -> nb::Result<NecContent, u32> 
+    where 
+    F : Fn(TIME, TIME) -> Duration<u32, MicroSeconds>, 
+    TIME: Copy
+    {
         //tunit = 9000us / 16 = 562.5us
         const TOL: u32 = 9_000u32 / 8u32; //= 9000us / 8 = 1125us
         match self.nec_state {
@@ -95,7 +104,7 @@ impl NecReceiver for IrReceiver {
             }
             NecState::ExpectLeadingActiveFinish(t0) => {
                 if !active {
-                    let dt = Duration::<u32, MicroSeconds>::from(now - t0);
+                    let dt = us_between(now, t0);
                     self.nec_state = if (dt >= (9000u32 - TOL).us()) && (dt <= (9000u32 + TOL).us())
                     {
                         //[9000us = 16] leading active pulse ended
@@ -107,7 +116,7 @@ impl NecReceiver for IrReceiver {
             }
             NecState::ExpectLeadingPulseFinish(t0) => {
                 if active {
-                    let t_pulse = Duration::<u32, MicroSeconds>::from(now - t0);
+                    let t_pulse = us_between(now, t0);
                     if t_pulse <= (9000u32 + 4500u32 + TOL).us() {
                         if t_pulse < (9000u32 + (2250u32 + 4500u32) / 2u32).us() {
                             //leading signal finished with [2250us = 4] inactive -> 'repeat code' received
@@ -124,7 +133,7 @@ impl NecReceiver for IrReceiver {
             }
             NecState::ExpectDataActiveFinish((t0, index, data)) => {
                 if !active {
-                    let dt = Duration::<u32, MicroSeconds>::from(now - t0);
+                    let dt = us_between(now, t0);
 
                     if dt < 1125u32.us() {
                         //active pulse length is [562us = 1]
@@ -136,7 +145,7 @@ impl NecReceiver for IrReceiver {
             }
             NecState::ExpectDataPulseFinish((t0, index, data)) => {
                 if active {
-                    let t_pulse = Duration::<u32, MicroSeconds>::from(now - t0);
+                    let t_pulse = us_between(now, t0);
 
                     if t_pulse <= (2250u32 + TOL).us() {
                         let data = if t_pulse > ((1125u32 + 2250u32) / 2u32).us() {
@@ -144,7 +153,7 @@ impl NecReceiver for IrReceiver {
                             (data << 1) | 1
                         } else {
                             //active + inactive pulse length is [1225us = 2]
-                            (data << 1)
+                            data << 1
                         };
 
                         if index < 31 {
