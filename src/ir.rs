@@ -18,7 +18,7 @@
 //
 #![deny(unsafe_code)]
 
-use crate::timing::{Duration, MicroSeconds, Time, TimeExt};
+use crate::timing::{Duration, MicroSeconds, TimeExt};
 
 pub struct IrReceiver<TIME> {
     nec_state: NecState<TIME>,

@@ -37,7 +37,11 @@ impl<DURATION> Roll<DURATION> {
         }
     }
 
-    pub fn update(&mut self, delta_t: DURATION, driving_current_detected: bool) -> State
+    pub fn state(&self) -> State {
+        self.state
+    }
+
+    pub fn update(&mut self, delta_t: DURATION, driving_current_detected: bool)
     where
         DURATION: Default
             + PartialOrd
@@ -86,8 +90,7 @@ impl<DURATION> Roll<DURATION> {
                     }
                 }
             }
-        }
-        self.state
+        }        
     }
 
     pub fn execute(&mut self, command: Command<DURATION>)

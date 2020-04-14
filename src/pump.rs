@@ -1,4 +1,3 @@
-use panic_halt as _;
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 
 pub trait Pump {
