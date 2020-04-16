@@ -1,6 +1,6 @@
-//! If something connected on the AC mains and its voltage and current can be measured with 
-//! DAC for a few periods, this module is able to calculate power usage statistics 
-//! Important notes: 
+//! If something connected on the AC mains and its voltage and current can be measured with
+//! DAC for a few periods, this module is able to calculate power usage statistics
+//! Important notes:
 //! - if the measurement of voltage and current has differrent sign, lets set the wrong_sign in the constructor
 //! - the minimum power can be below zero in case of non resistive (inductive / capacitive) load
 //! - there can be noice in calculations and in computations, so use histeresis epsilons on the output
@@ -9,7 +9,6 @@ use core::ops::Add;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Statistics {
-    //pub avg_power: u32,
     pub min_power: i32,
     pub avg_power: i32,
     pub max_power: i32,
@@ -104,6 +103,7 @@ where
                 avg_power: v.avg_power,
                 ..v
             });
+
             self.in_progress = None;
 
             self.current_sum = 0;

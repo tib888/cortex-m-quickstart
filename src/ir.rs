@@ -18,8 +18,6 @@
 //
 #![deny(unsafe_code)]
 
-use crate::timing::{Duration, MicroSeconds, TimeExt};
-
 pub struct IrReceiver<TIME> {
     nec_state: NecState<TIME>,
 }
@@ -51,19 +49,19 @@ pub trait NecReceiver<TIME> {
     ///
     /// * `now`- time instant (convertable to microsec with at least 500us resolution)
     /// * `active`- level of the IR receiver
-    ///
+    /// * `us_since` - a function, which computes the elapsed microseconds since the given time
     /// It will move the internal state machine and finally return the received command.
     ///
     /// *Note*: Due to the nonblocking implementation this can be polled arbitrary times
     /// with the correct parameters, not only at IR receiver level changes    
     fn receive<F>(
         &mut self,
-        now: TIME,
         active: bool,
-        us_between: F
+        now: TIME,
+        us_since: F
     ) -> nb::Result<NecContent, u32> 
     where 
-    F : Fn(TIME, TIME) -> Duration<u32, MicroSeconds>, 
+    F : Fn(TIME) -> u32, 
     TIME: Copy;
 }
 
@@ -78,17 +76,17 @@ enum NecState<TIME> {
 
 impl<TIME> NecReceiver<TIME> for IrReceiver<TIME> {
     fn receive<F>(
-        &mut self,
-        now: TIME,
+        &mut self,        
         active: bool,
-        us_between: F
+        now: TIME,
+        us_since: F
     ) -> nb::Result<NecContent, u32> 
     where 
-    F : Fn(TIME, TIME) -> Duration<u32, MicroSeconds>, 
+    F : Fn(TIME) -> u32, 
     TIME: Copy
     {
         //tunit = 9000us / 16 = 562.5us
-        const TOL: u32 = 9_000u32 / 8u32; //= 9000us / 8 = 1125us
+        const TOL: u32 = 9_000 / 8; //= 9000us / 8 = 1125us
         match self.nec_state {
             NecState::ExpectInactive => {
                 if !active {
@@ -104,8 +102,8 @@ impl<TIME> NecReceiver<TIME> for IrReceiver<TIME> {
             }
             NecState::ExpectLeadingActiveFinish(t0) => {
                 if !active {
-                    let dt = us_between(now, t0);
-                    self.nec_state = if (dt >= (9000u32 - TOL).us()) && (dt <= (9000u32 + TOL).us())
+                    let dt = us_since(t0);
+                    self.nec_state = if (dt >= (9000 - TOL)) && (dt <= (9000 + TOL))
                     {
                         //[9000us = 16] leading active pulse ended
                         NecState::ExpectLeadingPulseFinish(t0)
@@ -116,9 +114,9 @@ impl<TIME> NecReceiver<TIME> for IrReceiver<TIME> {
             }
             NecState::ExpectLeadingPulseFinish(t0) => {
                 if active {
-                    let t_pulse = us_between(now, t0);
-                    if t_pulse <= (9000u32 + 4500u32 + TOL).us() {
-                        if t_pulse < (9000u32 + (2250u32 + 4500u32) / 2u32).us() {
+                    let t_pulse = us_since(t0);
+                    if t_pulse <= (9000 + 4500 + TOL) {
+                        if t_pulse < (9000 + (2250 + 4500) / 2) {
                             //leading signal finished with [2250us = 4] inactive -> 'repeat code' received
                             self.nec_state = NecState::ExpectInactive;
                             return Ok(NecContent::Repeat);
@@ -133,9 +131,9 @@ impl<TIME> NecReceiver<TIME> for IrReceiver<TIME> {
             }
             NecState::ExpectDataActiveFinish((t0, index, data)) => {
                 if !active {
-                    let dt = us_between(now, t0);
+                    let dt = us_since(t0);
 
-                    if dt < 1125u32.us() {
+                    if dt < 1125 {
                         //active pulse length is [562us = 1]
                         self.nec_state = NecState::ExpectDataPulseFinish((t0, index, data));
                     } else {
@@ -145,10 +143,10 @@ impl<TIME> NecReceiver<TIME> for IrReceiver<TIME> {
             }
             NecState::ExpectDataPulseFinish((t0, index, data)) => {
                 if active {
-                    let t_pulse = us_between(now, t0);
+                    let t_pulse = us_since(t0);
 
-                    if t_pulse <= (2250u32 + TOL).us() {
-                        let data = if t_pulse > ((1125u32 + 2250u32) / 2u32).us() {
+                    if t_pulse <= (2250 + TOL) {
+                        let data = if t_pulse > (1125 + 2250) / 2 {
                             //active + inactive pulse length is [2250us = 4]
                             (data << 1) | 1
                         } else {
