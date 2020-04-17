@@ -1,19 +1,20 @@
-//! Models the roll operation
+//! Models the roll operation:
+//! using time based positioning in an autocalibrated range
 
 use core::ops::{Add, Sub};
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum Command<DURATION> {
-    SendUp,
-    SendDown,
-    SendTo(DURATION), //can be computed from bottom position if known
+    Open,
+    Close,
+    SetPosition(DURATION), //can be computed from bottom position if known
     Stop,
 }
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum State {
-    DrivingUp,
-    DrivingDown,
+    Opening,
+    Closing,
     Stopped,
 }
 
@@ -21,7 +22,7 @@ pub struct Roll<DURATION> {
     state: State,
     current: DURATION,
     target: Option<DURATION>,
-    bottom: Option<DURATION>,
+    maximum: Option<DURATION>,
 }
 
 impl<DURATION> Roll<DURATION> {
@@ -33,7 +34,7 @@ impl<DURATION> Roll<DURATION> {
             state: State::Stopped,
             current: DURATION::default(), //recalibrated when possible
             target: None,
-            bottom: None, //recalibrated when possible
+            maximum: None, //recalibrated when possible
         }
     }
 
@@ -41,7 +42,7 @@ impl<DURATION> Roll<DURATION> {
         self.state
     }
 
-    pub fn update(&mut self, delta_t: DURATION, driving_current_detected: bool)
+    pub fn update(&mut self, delta_t: DURATION, movement_detected: bool)
     where
         DURATION: Default
             + PartialOrd
@@ -53,12 +54,12 @@ impl<DURATION> Roll<DURATION> {
         if delta_t != DURATION::default() {
             match self.state {
                 State::Stopped => {}
-                State::DrivingDown => {
+                State::Closing => {
                     self.current = self.current + delta_t;
 
-                    if !driving_current_detected {
+                    if !movement_detected {
                         self.state = State::Stopped;
-                        self.bottom = Some(self.current);
+                        self.maximum = Some(self.current);
                         self.target = None;
                     } else {
                         if let Some(pos) = self.target {
@@ -69,14 +70,14 @@ impl<DURATION> Roll<DURATION> {
                         }
                     }
                 }
-                State::DrivingUp => {
+                State::Opening => {
                     if self.current > delta_t {
                         self.current = self.current - delta_t;
                     } else {
                         self.current = DURATION::default();
                     }
 
-                    if !driving_current_detected {
+                    if !movement_detected {
                         self.state = State::Stopped;
                         self.current = DURATION::default();
                         self.target = None;
@@ -101,19 +102,19 @@ impl<DURATION> Roll<DURATION> {
             Command::Stop => {
                 self.state = State::Stopped;
             }
-            Command::SendUp => {
+            Command::Open => {
                 self.target = None;
-                self.state = State::DrivingUp;
+                self.state = State::Opening;
             }
-            Command::SendDown => {
+            Command::Close => {
                 self.target = None;
-                self.state = State::DrivingDown;
+                self.state = State::Closing;
             }
-            Command::SendTo(pos) => {
+            Command::SetPosition(pos) => {
                 if self.current < pos {
-                    self.state = State::DrivingDown;
+                    self.state = State::Closing;
                 } else if self.current > pos {
-                    self.state = State::DrivingUp;
+                    self.state = State::Opening;
                 } else {
                     self.state = State::Stopped;
                 }
@@ -122,7 +123,7 @@ impl<DURATION> Roll<DURATION> {
         }
     }
 
-    pub fn bottom<'a>(&'a self) -> &'a Option<DURATION> {
-        &self.bottom
+    pub fn maximum<'a>(&'a self) -> &'a Option<DURATION> {
+        &self.maximum
     }
 }
