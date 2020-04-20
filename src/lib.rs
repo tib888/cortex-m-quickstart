@@ -11,6 +11,7 @@ pub mod ir;
 pub mod ir_remote;
 pub mod light_control;
 pub mod menu;
+pub mod messenger;
 pub mod pump;
 pub mod rgb;
 pub mod roll;
