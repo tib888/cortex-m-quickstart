@@ -30,8 +30,7 @@ where
 
     fn send_word(&mut self, intensity: u16) -> Result<(), ERRROR> {
         //send MSB first
-        let n = 15;
-        let mut mask = 1 << n;
+        let mut mask = 0x8000;
 
         while mask != 0 {
             if (intensity & mask) != 0 {
@@ -50,7 +49,7 @@ where
     }
 
     pub fn stereo(&mut self, intensity_left: u16, intensity_right: u16) -> Result<(), ERRROR> {
-        self.ws.set_high()?;
+        //self.ws.set_high()?;
         self.send_word(intensity_left)?; //the previous sample sent out at the rising edge of the first clock of this (?)
         self.ws.set_low()?;
         self.send_word(intensity_right)?;
@@ -59,20 +58,24 @@ where
     }
 
     pub fn left_mono(&mut self, intensity: u16) -> Result<(), ERRROR> {
-        self.ws.set_high()?;
+        //self.ws.set_high()?;
         self.send_word(intensity)?; //the previous sample sent out at the rising edge of the first clock of this (?)
         self.ws.set_low()?;
+        self.data.set_low()?;
         self.clk.set_high()?;
         self.clk.set_low()?;
+        self.ws.set_high()?;
         Ok(())
     }
 
     pub fn right_mono(&mut self, intensity: u16) -> Result<(), ERRROR> {
-        self.ws.set_low()?;
+        //self.ws.set_low()?;
         self.send_word(intensity)?;
         self.ws.set_high()?;
+        self.data.set_low()?;
         self.clk.set_high()?; //the previous sample sent out at the rising edge of the first clock of this (?)
         self.clk.set_low()?;
+        self.ws.set_low()?;
         Ok(())
     }
 }

@@ -3,7 +3,7 @@ use core::convert::From;
 use core::marker::PhantomData;
 use core::ops::{Add, Div, Mul, Sub};
 use cortex_m::peripheral::{DCB, DWT};
-use num_traits::{Num, WrappingAdd, WrappingSub};
+use num_traits::{Num, WrappingAdd, WrappingSub, Saturating};
 use stm32f1xx_hal::rcc::Clocks;
 
 /// Time unit marker, implies the tick frequency
@@ -173,6 +173,24 @@ where
     fn default() -> Duration<T, UNIT> {
         Duration::<T, UNIT> {
             count: T::default(),
+            unit: PhantomData::<UNIT>,
+        }
+    }
+}
+
+impl<T, UNIT> Saturating for Duration<T, UNIT>
+where
+    T: Saturating + Ord,
+{
+    fn saturating_add(self, rhs: Self) -> Self {
+        Self {
+            count: self.count.saturating_add(rhs.count),
+            unit: PhantomData::<UNIT>,
+        }
+    }
+    fn saturating_sub(self, rhs: Self) -> Self {
+        Self {
+            count: self.count.saturating_sub(rhs.count),
             unit: PhantomData::<UNIT>,
         }
     }

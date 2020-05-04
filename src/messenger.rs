@@ -1,7 +1,7 @@
 use stm32f1xx_hal::can::{
     Can, Configuration, FilterBankConfiguration, FilterData, FilterInfo, FilterMode, Frame, Id,
     Payload, Pins, ReceiveFifo, RxFifo, RxFifo0, RxFifo1, TransmitMailbox, TxMailBox, TxMailBox0,
-    TxMailBox1, TxMailBox2,
+    TxMailBox1, TxMailBox2, FilterMatchIndex, TimeStamp,
 };
 
 //debug only:
@@ -58,7 +58,7 @@ impl Messenger<CAN1> {
         PINS: Pins<CAN1>,
     {
         can.configure(&CAN_CONFIG);
-        nb::block!(can.to_normal()).unwrap(); //just to be sure
+        //nb::block!(can.to_normal()).unwrap(); //just to be sure
 
         let filter0 = FilterBankConfiguration {
             mode: FilterMode::List,
@@ -76,7 +76,8 @@ impl Messenger<CAN1> {
             active: true,
         };
         can.configure_filter_bank(0, &filter0);
-        //let filter2 = FilterBankConfiguration {
+
+        // let filter2 = FilterBankConfiguration {
         // 	mode: FilterMode::List,
         // 	info: FilterInfo::Whole(FilterData {
         // 		id: ID_TEMPERATURE.clone(),
@@ -86,6 +87,8 @@ impl Messenger<CAN1> {
         // 	active: true,
         // };
         // can.configure_filter_bank(2, &filter2);
+
+        let _ = can.to_normal();
 
         let (can_tx, rx) = can.split();
         let (tx0, tx1, tx2) = can_tx.split();
@@ -122,7 +125,20 @@ impl Messenger<CAN1> {
         return Err(());
     }
 
-    pub fn receive<T>(&mut self, tx: &mut T)
+    pub fn try_receive(&mut self) -> Option<(FilterMatchIndex, TimeStamp, Frame)>
+    {
+        if let Ok(msg0) = self.rx0.read() {
+            return Some(msg0);
+        };
+
+        if let Ok(msg1) = self.rx1.read() {
+            return Some(msg1);
+        };
+
+        None
+    }
+
+    pub fn receive_log<T>(&mut self, tx: &mut T)
     where
         T: Write,
     {

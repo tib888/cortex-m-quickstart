@@ -14,7 +14,6 @@ pub mod menu;
 pub mod messenger;
 pub mod pump;
 pub mod rgb;
-pub mod roll;
 pub mod timing;
 pub mod valve;
 
