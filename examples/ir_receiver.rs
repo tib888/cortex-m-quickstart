@@ -1,49 +1,63 @@
 //! Read the NEC IR remote commands on A15 GPIO as input with internal pullup
 //#![deny(unsafe_code)]
-#![deny(warnings)]
+//#![deny(warnings)]
 #![no_main]
 #![no_std]
 
-extern crate cortex_m;
-#[macro_use]
-extern crate cortex_m_rt as rt;
-extern crate cortex_m_semihosting as sh;
-extern crate embedded_hal;
-extern crate nb;
-extern crate panic_halt;
-extern crate room_pill;
-extern crate stm32f1xx_hal as hal;
+use panic_halt as _;
 
-use crate::hal::prelude::*;
-use crate::hal::stm32f1xx;
-use crate::rt::entry;
-use crate::rt::ExceptionFrame;
-use crate::sh::hio;
+use cortex_m;
+#[macro_use]
+use cortex_m_rt;
+use cortex_m_semihosting;
+use embedded_hal;
+use nb;
+use panic_halt;
+use room_pill;
+use stm32f1xx_hal;
+
+use embedded_hal::{
+	digital::v2::{InputPin},
+};
+use cortex_m_rt::{entry, exception, ExceptionFrame};
+use cortex_m_semihosting::hio;
+use stm32f1xx_hal::{ prelude::*, watchdog::IndependentWatchdog, };
 use core::fmt::Write;
 use room_pill::{
-    ir,
-    ir::NecReceiver,
-    time::{Ticker, Ticks, Time},
+	ir,
+	ir::NecReceiver,
+	timing::{Ticker},
 };
 
 #[entry]
-fn main() -> ! {
-    let cp = cortex_m::Peripherals::take().unwrap();
-    let dp = stm32f1xx::Peripherals::take().unwrap();
+fn main() -> ! {    
+    let device = stm32f1xx_hal::pac::Peripherals::take().unwrap();
+    let mut watchdog = IndependentWatchdog::new(device.IWDG);
+    watchdog.start(stm32f1xx_hal::time::U32Ext::ms(2_000u32));
+    
+    let core = cortex_m::Peripherals::take().unwrap();
+    let mut rcc = device.RCC.constrain();
+    let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
+	let gpiob = device.GPIOB.split(&mut rcc.apb2);
+    
+    let mut afio = device.AFIO.constrain(&mut rcc.apb2);
 
-    let mut rcc = dp.RCC.constrain();
-    let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
-    let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
+    // Disables the JTAG to free up pb3, pb4 and pa15 for normal use
+    let (pa15, _pb3_itm_swo, _pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
+    
+    let ir_receiver = pa15.into_pull_up_input(&mut gpioa.crh);
 
-    let mut flash = dp.FLASH.constrain();
+    let mut flash = device.FLASH.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
-    let tick = Ticker::new(cp.DWT, cp.DCB, clocks);
+    let tick = Ticker::new(core.DWT, core.DCB, clocks);
 
-    let mut receiver = ir::IrReceiver::<Time<Ticks>>::new();
+    let mut receiver = ir::IrReceiver::new();
 
     loop {
-        let t = tick.now();
-        let ir_cmd = receiver.receive(t, ir_receiver.is_low());
+        let now = tick.now();
+        let ir_cmd = receiver.receive(ir_receiver.is_low().unwrap(), now, |last| {
+			tick.to_us(now - last).into()
+		});
         print_ir_command(&ir_cmd);
     }
 }

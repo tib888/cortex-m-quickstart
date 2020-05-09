@@ -75,6 +75,13 @@ where
             unit: PhantomData::<Seconds>,
         }
     }
+
+    pub fn from_sec(seconds: T) -> Time<T, Seconds> {
+        Time::<T, Seconds> {
+            instant: seconds,
+            unit: PhantomData::<Seconds>,
+        }
+    }
 }
 
 impl<UNIT> From<u32> for Duration<u32, UNIT> {
@@ -106,6 +113,19 @@ impl<UNIT> From<Duration<u64, UNIT>> for u64 {
         duration.count
     }
 }
+
+impl<UNIT> From<Time<u32, UNIT>> for u32 {
+    fn from(time: Time<u32, UNIT>) -> u32 {
+        time.instant
+    }
+}
+
+impl<UNIT> From<Time<u64, UNIT>> for u64 {
+    fn from(time: Time<u64, UNIT>) -> u64 {
+        time.instant
+    }
+}
+
 
 impl<UNIT> From<Duration<u64, UNIT>> for Duration<u32, UNIT> {
     fn from(duration: Duration<u64, UNIT>) -> Duration<u32, UNIT> {

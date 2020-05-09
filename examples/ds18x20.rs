@@ -1,44 +1,38 @@
 //! Read the temperature from DS18B20 1-wire temperature sensors connected to B4 GPIO
 //! JTAG is removed from B3, B4 to make it work
 //#![deny(unsafe_code)]
-#![deny(warnings)]
+//#![deny(warnings)]
 #![no_std]
 #![no_main]
 
-extern crate cortex_m;
-extern crate cortex_m_semihosting as sh;
-extern crate embedded_hal;
+use cortex_m;
+use cortex_m_semihosting;
 #[macro_use]
-extern crate cortex_m_rt as rt;
-extern crate nb;
-extern crate onewire;
-extern crate panic_halt;
-extern crate stm32f1xx_hal as hal;
+use cortex_m_rt;
+use onewire;
+use panic_halt as _;
+use stm32f1xx_hal;
 
-use crate::hal::delay::Delay;
-use crate::hal::prelude::*;
-use crate::hal::stm32f1xx;
-use crate::rt::entry;
-use crate::rt::ExceptionFrame;
-use crate::sh::hio;
+use stm32f1xx_hal::{ delay::Delay, prelude::* };
+use cortex_m_rt::{entry, exception, ExceptionFrame};
+use cortex_m_semihosting::hio;
 use core::fmt::Write;
 
-use onewire::ds18x20::*;
-use onewire::*;
+use onewire::{*, ds18x20::* };
 
 #[entry]
 fn main() -> ! {
     let mut hstdout = hio::hstdout().unwrap();
 
-    let cp = cortex_m::Peripherals::take().unwrap();
-    let dp = stm32f1xx::Peripherals::take().unwrap();
+    let core = cortex_m::Peripherals::take().unwrap();
+    let device = stm32f1xx_hal::pac::Peripherals::take().unwrap();
 
-    let mut flash = dp.FLASH.constrain();
+    let mut flash = device.FLASH.constrain();
 
     //flash.acr.prftbe().enabled();//?? Configure Flash prefetch - Prefetch buffer is not available on value line devices
     //scb().set_priority_grouping(NVIC_PRIORITYGROUP_4);
 
-    let mut rcc = dp.RCC.constrain();
+    let mut rcc = device.RCC.constrain();
     let clocks = rcc
         .cfgr
         .use_hse(8.mhz())
@@ -48,19 +42,22 @@ fn main() -> ! {
         .pclk2(72.mhz())
         .freeze(&mut flash.acr);
 
-    let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
+    let gpioa = device.GPIOA.split(&mut rcc.apb2);
+	let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
+	let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
+
+    let mut afio = device.AFIO.constrain(&mut rcc.apb2);
     // Disables the JTAG to free up pb3, pb4 and pa15 for normal use
-    afio.mapr.disable_jtag();
-
-    let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
-
+    let (_pa15, _pb3_itm_swo, pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
+    
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
-    let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
-
-    let delay = Delay::new(cp.SYST, clocks);
-    let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
-    let mut one_wire = OneWirePort::new(io, delay);
+    let mut one_wire = {
+		// DS18B20 1-wire temperature sensors connected to B4 GPIO
+		let onewire_io = pb4.into_open_drain_output(&mut gpiob.crl);
+		let delay = Delay::new(core.SYST, clocks);
+		OneWirePort::new(onewire_io, delay).unwrap()
+	};
 
     let mut it = RomIterator::new(0);
     loop {
@@ -98,7 +95,7 @@ fn main() -> ! {
             }
 
             _ => {
-                led.toggle();
+                led.toggle().unwrap();
             }
         }
 
@@ -108,10 +105,10 @@ fn main() -> ! {
 
 #[exception]
 fn HardFault(ef: &ExceptionFrame) -> ! {
-    panic!("{:#?}", ef);
+	panic!("HardFault at {:#?}", ef);
 }
 
 #[exception]
 fn DefaultHandler(irqn: i16) {
-    panic!("Unhandled exception (IRQn = {})", irqn);
+	panic!("Unhandled exception (IRQn = {})", irqn);
 }

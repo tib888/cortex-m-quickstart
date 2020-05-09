@@ -1,5 +1,4 @@
 //#![deny(unsafe_code)]
-//#![deny(warnings)]
 #![no_std]
 
 pub mod ac_sense;

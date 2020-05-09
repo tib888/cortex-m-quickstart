@@ -28,32 +28,27 @@
 #![no_main]
 #![no_std]
 
-extern crate cortex_m;
-#[macro_use]
-extern crate cortex_m_rt as rt;
-extern crate cortex_m_semihosting as sh;
-extern crate embedded_hal;
-extern crate lcd_hal;
-extern crate nb;
-extern crate onewire;
-extern crate panic_halt;
-extern crate room_pill;
-extern crate stm32f1xx_hal as hal;
+use panic_halt as _;
 
-use crate::hal::{delay::Delay, prelude::*, stm32f1xx, watchdog::IndependentWatchdog};
-use crate::rt::ExceptionFrame;
-use embedded_hal::watchdog::{Watchdog, WatchdogEnable};
-use ir::NecReceiver;
-use lcd_hal::{hx1230, hx1230::Hx1230};
+use cortex_m;
+use cortex_m_rt;
+use embedded_hal;
+use room_pill;
+use stm32f1xx_hal;
+
+use cortex_m_rt::{entry, exception, ExceptionFrame};
+use embedded_hal::digital::v2::InputPin;
+use lcd_hal::{hx1230, hx1230::Hx1230, Display};
 use onewire::{ds18x20::*, temperature::Temperature, *};
 use room_pill::{
     display::*,
     ir,
+    ir::NecReceiver,
     ir_remote::*,
-    rgb::*,
-    time::{Duration, Ticker, SysTicks, Seconds Time},
+    rgb::{Colors, Rgb, RgbLed},
+    timing::Ticker,
 };
-use rt::entry;
+use stm32f1xx_hal::{delay::Delay, prelude::*, watchdog::IndependentWatchdog};
 
 const MAX_THERMOMETER_COUNT: usize = 1; //max number of thermometers
 
@@ -88,27 +83,23 @@ impl Model {
         self.temperatures[index] = temperature;
     }
 
-    fn refresh_display<D: lcd_hal::Display>(
+    fn refresh_display<D: lcd_hal::Display, RGB: Rgb>(
         &self,
         display: &mut D,
-        rgb: &mut room_pill::rgb::RgbLed<
-            hal::gpio::gpiob::PB13<hal::gpio::Output<hal::gpio::OpenDrain>>,
-            hal::gpio::gpiob::PB14<hal::gpio::Output<hal::gpio::OpenDrain>>,
-            hal::gpio::gpiob::PB15<hal::gpio::Output<hal::gpio::OpenDrain>>,
-        >,
-    ) {
-        display.clear();
+        rgb: &mut RGB,
+    ) -> Result<(), D::Error> {
+        display.clear()?;
 
-        display.set_position(0, 1);
-        display.print(b"Cel  ");
-        display.print(fmt_temp(self.target_temperature));
+        display.set_position(0, 1)?;
+        display.print(b"Cel  ")?;
+        display.print(unsafe { fmt_temp(self.target_temperature) })?;
 
         if let Some(temp) = self.temperatures[0 as usize] {
-            display.set_position(0, 2);
-            display.print(b"Temp ");
-            display.print(fmt_temp(temp));
+            display.set_position(0, 2)?;
+            display.print(b"Temp ")?;
+            display.print(unsafe { fmt_temp(temp) })?;
 
-            rgb.color(if temp > self.target_temperature {
+            let _ = rgb.color(if temp > self.target_temperature {
                 Colors::Red
             } else if temp < self.target_temperature {
                 Colors::Blue
@@ -116,21 +107,22 @@ impl Model {
                 Colors::Green
             });
         } else {
-            rgb.color(Colors::Black);
+            let _ = rgb.color(Colors::Black);
         }
+
+        Ok(())
     }
 }
 
 #[entry]
 fn main() -> ! {
-    let dp = stm32f1xx::Peripherals::take().unwrap();
+    let device = stm32f1xx_hal::pac::Peripherals::take().unwrap();
+    let mut watchdog = IndependentWatchdog::new(device.IWDG);
+    watchdog.start(stm32f1xx_hal::time::U32Ext::ms(2_000u32));
 
-    let mut watchdog = IndependentWatchdog::new(dp.IWDG);
-    watchdog.start(2_000_000u32.us());
+    let mut flash = device.FLASH.constrain();
 
-    let mut flash = dp.FLASH.constrain();
-
-    let mut rcc = dp.RCC.constrain();
+    let mut rcc = device.RCC.constrain();
     let clocks = rcc
         .cfgr
         .use_hse(8.mhz())
@@ -138,20 +130,23 @@ fn main() -> ! {
         .hclk(72.mhz())
         .pclk1(36.mhz())
         .pclk2(72.mhz())
+        .adcclk(9.mhz()) //ADC clock: PCLK2 / 8. User specified value is be approximated using supported prescaler values 2/4/6/8.
         .freeze(&mut flash.acr);
     watchdog.feed();
 
-    let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
-    // Disables the JTAG to free up pb3, pb4 and pa15 for normal use
-    afio.mapr.disable_jtag();
+    let mut afio = device.AFIO.constrain(&mut rcc.apb2);
 
+    //configure pins:
+    let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
+    let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
+    let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
+
+    // Disables the JTAG to free up pb3, pb4 and pa15 for normal use
+    let (pa15, _pb3_itm_swo, pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
     //let mut hstdout = hio::hstdout().unwrap();
-    let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
-    let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
-    let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
 
     // IR receiver^
-    let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
+    let ir_receiver = pa15.into_pull_up_input(&mut gpioa.crh);
 
     // RGB led:
     let mut rgb = RgbLed::new(
@@ -173,23 +168,27 @@ fn main() -> ! {
     gpioa.pa1.into_floating_input(&mut gpioa.crl); //placeholder for Backlight, wired on board
     gpioa.pa0.into_floating_input(&mut gpioa.crl); //placeholder for Gnd, wired on board
 
-    let cp = cortex_m::Peripherals::take().unwrap();
-    let mut delay = Delay::new(cp.SYST, clocks);
+    let core = cortex_m::Peripherals::take().unwrap();
+    let mut delay = Delay::new(core.SYST, clocks);
 
-    let mut display = hx1230::gpio::Hx1230Gpio::new(sck, mosi, cs, &mut rst, &mut delay);
-    display.init();
-    display.set_contrast(7);
+    let mut display = hx1230::gpio::Hx1230Gpio::new(sck, mosi, cs, &mut rst, &mut delay).unwrap();
+    display.init().unwrap();
+    display.set_contrast(7).unwrap();
+    display.clear().unwrap();
 
     watchdog.feed();
 
     // setup the one wire thermometers:
-    let io = gpiob.pb4.into_open_drain_output(&mut gpiob.crl);
-    let mut one_wire = OneWirePort::new(io, delay);
+    let mut one_wire = {
+        // DS18B20 1-wire temperature sensors connected to B4 GPIO
+        let onewire_io = pb4.into_open_drain_output(&mut gpiob.crl);
+        OneWirePort::new(onewire_io, delay).unwrap()
+    };
 
     watchdog.feed();
 
-    let ticker = Ticker::new(cp.DWT, cp.DCB, clocks);
-    let mut receiver = ir::IrReceiver::<Time<u32, SysTicks>>::new();
+    let tick = Ticker::new(core.DWT, core.DCB, clocks);
+    let mut receiver = ir::IrReceiver::new();
 
     watchdog.feed();
 
@@ -225,7 +224,7 @@ fn main() -> ! {
             }
 
             Err(_e) => {
-                rgb.color(Colors::White);
+                rgb.color(Colors::White).unwrap();
                 break;
             }
         }
@@ -235,39 +234,35 @@ fn main() -> ! {
     let roms = roms;
     let count = count;
 
-    let mut last_time = ticker.now();
+    let mut last_big = tick.now();
 
     loop {
         watchdog.feed();
 
+        let now = tick.now();
+
         //update the IR receiver statemachine:
-        let ir_cmd = receiver.receive(ticker.now(), ir_receiver.is_low());
+        let ir_cmd = receiver.receive(ir_receiver.is_low().unwrap(), now, |last| {
+            tick.to_us(now - last).into()
+        });
 
         match ir_cmd {
             Ok(ir::NecContent::Repeat) => {}
             Ok(ir::NecContent::Data(data)) => {
                 let command = translate(data);
                 model.ir_remote_command(command);
-                model.refresh_display(&mut display, &mut rgb);
+                model.refresh_display(&mut display, &mut rgb).unwrap();
             }
             _ => {}
         }
-
-        // calculate the time since last execution:
-        let delta = ticker.now() - last_time;
-
         // do not execute the followings too often: (temperature conversion time of the sensors is a lower limit)
-        if delta < 1u32.s() {
+        if u32::from(now - last_big) < tick.frequency {
             continue;
         }
 
-        led.toggle();
+        last_big = now;
 
-        // decrease the time resolution
-        let delta_time = Duration::<u32, Seconds>::from(delta);
-
-        // keep the difference measurement accurate by keeping the fractions...
-        last_time = last_time + Duration::<u32, SysTicks>::from(delta_time);
+        led.toggle().unwrap();
 
         //read sensors and restart temperature measurement
         for i in 0..count {
@@ -281,7 +276,7 @@ fn main() -> ! {
             let _ = one_wire.start_temperature_measurement(&roms[i]);
         }
 
-        model.refresh_display(&mut display, &mut rgb);
+        model.refresh_display(&mut display, &mut rgb).unwrap();
     }
 }
 

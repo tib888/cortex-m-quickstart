@@ -2,17 +2,6 @@
 
 use embedded_hal::digital::v2::OutputPin;
 
-pub struct RgbLed<RPIN, GPIN, BPIN>
-where
-    RPIN: OutputPin,
-    GPIN: OutputPin,
-    BPIN: OutputPin,
-{
-    r: RPIN,
-    g: GPIN,
-    b: BPIN,
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Colors {
     Black = 0x000000,
@@ -25,6 +14,26 @@ pub enum Colors {
     White = 0xFFFFFF,
 }
 
+pub trait Rgb {
+    type Error;
+    fn set(&mut self, r: bool, g: bool, b: bool) -> Result<(), Self::Error>;
+    fn raw_color(&mut self, col: u32) -> Result<(), Self::Error>;
+    fn color(&mut self, color: Colors) -> Result<(), Self::Error> {
+        self.raw_color(color as u32)
+    }
+}
+
+pub struct RgbLed<RPIN, GPIN, BPIN>
+where
+    RPIN: OutputPin,
+    GPIN: OutputPin,
+    BPIN: OutputPin,
+{
+    r: RPIN,
+    g: GPIN,
+    b: BPIN,
+}
+
 impl<RPIN, GPIN, BPIN, ERROR> RgbLed<RPIN, GPIN, BPIN>
 where
     RPIN: OutputPin<Error = ERROR>,
@@ -34,8 +43,17 @@ where
     pub fn new(r: RPIN, g: GPIN, b: BPIN) -> Self {
         RgbLed { r, g, b }
     }
+}
 
-    pub fn set(&mut self, r: bool, g: bool, b: bool) -> Result<(), ERROR> {
+impl<RPIN, GPIN, BPIN, ERROR> Rgb for RgbLed<RPIN, GPIN, BPIN>
+where
+    RPIN: OutputPin<Error = ERROR>,
+    GPIN: OutputPin<Error = ERROR>,
+    BPIN: OutputPin<Error = ERROR>,
+{
+    type Error = ERROR;
+
+    fn set(&mut self, r: bool, g: bool, b: bool) -> Result<(), Self::Error> {
         if !r {
             self.r.set_high()?;
         } else {
@@ -54,11 +72,7 @@ where
         Ok(())
     }
 
-    pub fn color(&mut self, color: Colors) -> Result<(), ERROR> {
-        self.raw_color(color as u32)
-    }
-
-    pub fn raw_color(&mut self, col: u32) -> Result<(), ERROR> {
+    fn raw_color(&mut self, col: u32) -> Result<(), Self::Error> {
         let c = col as u32;
         self.set(
             (c & 0x000080) != 0,

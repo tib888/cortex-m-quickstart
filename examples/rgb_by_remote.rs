@@ -2,40 +2,48 @@
 //! RGB led on PB13, PB14, PB15 as push pull output
 //! Reacts to the colored buttons on the remotes with colors on the rgb led.
 //#![deny(unsafe_code)]
-#![deny(warnings)]
+//#![deny(warnings)]
 #![no_main]
 #![no_std]
 
-extern crate cortex_m;
-#[macro_use]
-extern crate cortex_m_rt as rt;
-extern crate cortex_m_semihosting as sh;
-extern crate embedded_hal;
-extern crate onewire;
-extern crate panic_halt;
-extern crate room_pill;
-extern crate stm32f1xx_hal as hal;
+use panic_halt as _;
 
-use crate::hal::prelude::*;
-use crate::hal::stm32f1xx;
-use crate::hal::time::*;
-use crate::rt::entry;
-use crate::rt::ExceptionFrame;
-use room_pill::{ir, ir::NecReceiver, rgb::*, time::SysTicks};
+use cortex_m;
+#[macro_use]
+use cortex_m_rt;
+use embedded_hal;
+use panic_halt;
+use room_pill;
+use stm32f1xx_hal;
+
+use embedded_hal::{
+	digital::v2::{InputPin},
+};
+use cortex_m_rt::{entry, exception, ExceptionFrame};
+use stm32f1xx_hal::{ prelude::* };
+use room_pill::{
+	ir,
+	ir::NecReceiver,
+    timing::{Ticker},
+    rgb::{Colors, RgbLed, Rgb},
+};
 
 #[entry]
 fn main() -> ! {
-    let cp = cortex_m::Peripherals::take().unwrap();
-    let dp = stm32f1xx::Peripherals::take().unwrap();
+    let core = cortex_m::Peripherals::take().unwrap();
+    let device = stm32f1xx_hal::pac::Peripherals::take().unwrap();
+    let mut rcc = device.RCC.constrain();
+    let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
+	let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
+    let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
+    
+    let mut afio = device.AFIO.constrain(&mut rcc.apb2);
 
-    let mut rcc = dp.RCC.constrain();
-
-    let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
-    let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
-    let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
+    // Disables the JTAG to free up pb3, pb4 and pa15 for normal use
+    let (pa15, _pb3_itm_swo, _pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
 
     //IR receiver^
-    let ir_receiver = gpioa.pa15.into_pull_up_input(&mut gpioa.crh);
+    let ir_receiver = pa15.into_pull_up_input(&mut gpioa.crh);
 
     //RGB led:
     let mut rgb = RgbLed::new(
@@ -47,18 +55,19 @@ fn main() -> ! {
     //On board led^:
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
-    let mut flash = dp.FLASH.constrain();
+    let mut flash = device.FLASH.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
-    let trace_enabled = enable_trace(cp.DCB);
-    let ticker = MonoTimer::new(cp.DWT, trace_enabled, clocks);
+    let tick = Ticker::new(core.DWT, core.DCB, clocks);
 
-    let mut receiver = ir::IrReceiver::<room_pill::time::Time<u32, SysTicks>>::new(); // period = 0.5ms = 500us
+    let mut receiver = ir::IrReceiver::new(); // period = 0.5ms = 500us
 
     let mut color = Colors::White as u32;
 
     loop {
-        let t = ticker.now();
-        let ir_cmd = receiver.receive(&ticker, t, ir_receiver.is_low());
+        let now = tick.now();
+        let ir_cmd = receiver.receive(ir_receiver.is_low().unwrap(), now, |last| {
+			tick.to_us(now - last).into()
+		});
 
         let c = match ir_cmd {
             Ok(ir::NecContent::Repeat) => None,
@@ -69,7 +78,7 @@ fn main() -> ! {
                 0x20F086 | 0x807F18 => Some(Colors::Blue as u32),
                 0x20F022 | 0x807FC8 => Some(Colors::White as u32),
                 _ => {
-                    led.toggle();
+                    led.toggle().unwrap();
                     Some(Colors::Black as u32)
                 }
             },
@@ -77,7 +86,7 @@ fn main() -> ! {
         };
 
         if let Some(c) = c {
-            if led.is_set_high() {
+            if led.is_set_high().unwrap() {
                 //mix mode
                 color = color ^ c;
             } else {
@@ -85,7 +94,7 @@ fn main() -> ! {
                 color = c;
             }
 
-            rgb.raw_color(color);
+            rgb.raw_color(color).unwrap();
         }
     }
 }
